@@ -14,7 +14,17 @@ from inventory.collector.netpolicy import (
     derive_resourcequota,
     derive_service,
 )
+from inventory.collector.platform import (
+    derive_apiservice,
+    derive_binding,
+    derive_clusterrole,
+    derive_webhook,
+    in_use_api_version,
+    is_platform_role,
+    is_rancher_generated,
+)
 from inventory.collector.podspec import derive_pod, derive_workload
+from inventory.collector.podspec import skip_object as skip_job
 from inventory.collector.storage import (
     derive_csidriver,
     derive_node_provider,
@@ -36,6 +46,7 @@ class Trimmed:
     annotations: list[tuple[str, str, bool]] = field(default_factory=list)
     images: list[str] = field(default_factory=list)
     addresses: list[Address] = field(default_factory=list)
+    in_use: tuple[str, str] | None = None  # apiVersion and kind from last-applied-configuration
     hash: str = ""
 
 
@@ -163,6 +174,25 @@ _DERIVED = {
 }
 
 
+_RBAC_FLAGGED = ("clusterroles", "clusterrolebindings", "rolebindings",
+                 "mutatingwebhookconfigurations", "validatingwebhookconfigurations")  # fmt: skip
+_DERIVED.update({
+    "mutatingwebhookconfigurations": derive_webhook,
+    "validatingwebhookconfigurations": derive_webhook,
+    "apiservices": lambda obj: derive_apiservice(obj) or {},
+    "clusterroles": derive_clusterrole,
+    "clusterrolebindings": derive_binding,
+    "rolebindings": derive_binding,
+})
+
+
+def skip_object(kind: str, obj: dict) -> bool:
+    """Objects that are not stored: CronJob-owned jobs and local (non-aggregated) APIServices."""
+    if kind == "apiservices":
+        return derive_apiservice(obj) is None
+    return skip_job(kind, obj)
+
+
 @dataclass
 class ClusterContext:
     """Facts from kinds listed earlier in the same cluster run. None means not known."""
@@ -191,6 +221,10 @@ def trim(kind: KindSpec, obj: dict, rules: Rules | None = None, ctx: ClusterCont
             derive(obj, data)
         if kind.name in _DERIVED:
             data.update(_DERIVED[kind.name](obj))
+        if kind.name in _RBAC_FLAGGED and rules is not None:
+            data["rancher_generated"] = is_rancher_generated(obj, rules)
+        if kind.name == "clusterroles" and rules is not None:
+            data["platform"] = is_platform_role(obj, rules)
         if kind.name == "persistentvolumeclaims":
             users = ctx.pvc_users if ctx else None
             data.update(derive_pvc(obj, set(users) if users is not None else None, users))
@@ -203,6 +237,7 @@ def trim(kind: KindSpec, obj: dict, rules: Rules | None = None, ctx: ClusterCont
         data=data,
         labels=labels,
         images=_images(obj),
+        in_use=in_use_api_version(obj),
     )
     if kind.annotations and rules is not None:
         t.annotations = filter_annotations(meta.get("annotations") or {}, rules)

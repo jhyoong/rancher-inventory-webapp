@@ -173,3 +173,22 @@ def write_run_kind(
         " VALUES (?, ?, ?, ?, ?, ?, ?)",
         (run_id, site, cluster_id, kind, status, objects, error),
     )
+
+
+def write_api_versions(
+    conn: sqlite3.Connection, site: str, cluster_id: str,
+    served: list[str] | None, in_use: set[tuple[str, str]],
+) -> None:  # fmt: skip
+    """Replace a cluster's API versions. served None keeps the stored served rows."""
+    with transaction(conn):
+        if served is not None:
+            conn.execute("DELETE FROM api_versions WHERE site=? AND cluster_id=? AND source='served'", (site, cluster_id))
+            conn.executemany(
+                "INSERT INTO api_versions (site, cluster_id, group_version, source, kind) VALUES (?, ?, ?, 'served', '')",
+                [(site, cluster_id, gv) for gv in served],
+            )
+        conn.execute("DELETE FROM api_versions WHERE site=? AND cluster_id=? AND source='in_use'", (site, cluster_id))
+        conn.executemany(
+            "INSERT INTO api_versions (site, cluster_id, group_version, source, kind) VALUES (?, ?, ?, 'in_use', ?)",
+            [(site, cluster_id, gv, kind) for gv, kind in sorted(in_use)],
+        )

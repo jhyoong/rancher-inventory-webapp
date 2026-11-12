@@ -171,3 +171,31 @@ kinds:
            spec.chart.metadata.name, spec.chart.metadata.version,
            spec.chart.metadata.appVersion,
            spec.info.status, spec.info.lastDeployed, spec.resources]
+
+  mutatingwebhookconfigurations:
+    path: /apis/admissionregistration.k8s.io/v1/mutatingwebhookconfigurations
+    scope: cluster
+    # derived: webhooks, failure_policies, service_namespaces, url_based, rules, intercepts_all,
+    #          timeouts, has_namespace_selector, helm_release, rancher_generated (URLs are not kept)
+
+  validatingwebhookconfigurations:
+    path: /apis/admissionregistration.k8s.io/v1/validatingwebhookconfigurations
+    scope: cluster
+
+  apiservices:   # aggregated APIs only; local ones are skipped
+    path: /apis/apiregistration.k8s.io/v1/apiservices
+    scope: cluster
+
+  clusterroles:
+    path: /apis/rbac.authorization.k8s.io/v1/clusterroles
+    scope: cluster
+    # derived: rule_count, aggregated, helm_managed, rancher_generated, platform
+
+  clusterrolebindings:
+    path: /apis/rbac.authorization.k8s.io/v1/clusterrolebindings
+    scope: cluster
+    # derived: role, subjects, rancher_generated
+
+  rolebindings:
+    path: /apis/rbac.authorization.k8s.io/v1/rolebindings
+    scope: namespaced

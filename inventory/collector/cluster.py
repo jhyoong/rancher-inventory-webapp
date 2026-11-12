@@ -5,9 +5,9 @@ from datetime import datetime, timezone
 
 from inventory.collector.classify import build_profiles
 from inventory.collector.kinds import KindSpec
-from inventory.collector.podspec import skip_object
+from inventory.collector.platform import collect_api_versions
 from inventory.collector.rules import Rules
-from inventory.collector.transform import ClusterContext, Trimmed, trim
+from inventory.collector.transform import ClusterContext, Trimmed, skip_object, trim
 from inventory.collector.units import metrics_from_cluster, parse_bytes, parse_cpu
 from inventory.db.repo import (
     delete_stale,
@@ -17,6 +17,7 @@ from inventory.db.repo import (
     upsert_cluster,
     upsert_resources,
     write_metrics,
+    write_api_versions,
     write_run_kind,
 )
 from inventory.rancher.client import RancherClient, RancherError
@@ -91,6 +92,7 @@ async def collect_cluster(
         return ClusterResult("failed", total, 0, 0, error)
 
     ctx = ClusterContext()
+    in_use: set[tuple[str, str]] = set()
     kind_status: dict[str, str] = {}
     objects = 0
     done = 0
@@ -117,6 +119,7 @@ async def collect_cluster(
             items = [trim(spec, o, rules, ctx) for o in raw if not skip_object(spec.name, o)]
             if spec.name == "pods":
                 ctx.pvc_users = pvc_users(items)
+            in_use.update(t.in_use for t in items if t.in_use)
             count = len(items)
             with transaction(conn):
                 upsert_resources(conn, site, cid, run_id, items)
@@ -149,7 +152,16 @@ async def collect_cluster(
         except RancherError as e:  # metrics-server missing or forbidden: usage stays empty
             logger.info("pod usage skipped for %s/%s: %s", site, cid, e)
 
+    served = None
+    if not stopped:
+        try:
+            served = await collect_api_versions(client, cid)
+        except RancherError as e:
+            logger.info("served API versions skipped for %s/%s: %s", site, cid, e)
+
     error = None
+    if not stopped and not failed_kinds:
+        write_api_versions(conn, site, cid, served, in_use)
     if rules is not None and not stopped and not failed_kinds:
         try:
             build_profiles(conn, site, cid, run_id, rules, pod_usage=pod_usage)

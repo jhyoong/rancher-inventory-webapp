@@ -40,3 +40,34 @@ system_crd_groups:
   - longhorn.io
   - metallb.io
   - cert-manager.io
+
+# Objects Rancher creates on every cluster. They are not counted as custom roles,
+# custom bindings or custom webhooks. Checked on the dev Rancher 2026-11-12.
+rancher_generated:
+  label_prefixes:
+    - authz.management.cattle.io/
+    - authz.cluster.cattle.io/
+    - management.cattle.io/
+    - objectset.rio.cattle.io/
+    - fleet.cattle.io/
+    - cattle.io/creator
+  annotation_prefixes:
+    - authz.cluster.cattle.io/
+    - authz.cluster.auth.io/
+    - cluster.cattle.io/
+    - objectset.rio.cattle.io/
+  owner_api_groups:
+    - management.cattle.io
+  name_patterns:
+    - "cattle-*"
+    - "grb-*"
+    - "crb-*"
+    - "globaladmin-*"
+
+# Roles of Kubernetes itself and of platform components. Not counted as custom roles.
+platform_roles:
+  names: ["system:*", cluster-admin, admin, edit, view]
+  label_keys: [kubernetes.io/bootstrapping, rke2.io/bootstrapping]
+  label_prefixes: [cluster.x-k8s.io/provider]   # Rancher's embedded Cluster API
+  owner_api_groups: [operator.tigera.io]
+  helm_in_system_namespace: true                  # Helm release namespace matches system_namespaces

@@ -14,6 +14,8 @@ class Rules:
     drop: list[str] = field(default_factory=list)
     system_namespaces: list[str] = field(default_factory=list)
     system_crd_groups: list[str] = field(default_factory=list)
+    rancher_generated: dict[str, list[str]] = field(default_factory=dict)
+    platform_roles: dict = field(default_factory=dict)
 
 
 def _read_yaml(path: Path) -> dict:
@@ -59,7 +61,19 @@ def load_rules(settings) -> Rules:
             raise ConfigError(f"{name} must be a list of non-empty strings in {path}")
         return list(value)
 
+    def string_map(value, name: str, flags: tuple[str, ...] = ()) -> dict:
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            raise ConfigError(f"{name} must be a mapping in {path}")
+        out: dict = {}
+        for key, item in value.items():
+            out[key] = bool(item) if key in flags else strings(item, f"{name}.{key}")
+        return out
+
     return Rules(
+        rancher_generated=string_map(data.get("rancher_generated"), "rancher_generated"),
+        platform_roles=string_map(data.get("platform_roles"), "platform_roles", ("helm_in_system_namespace",)),
         max_value_chars=max_chars,
         system_domains=strings(ann.get("system_domains"), "annotations.system_domains"),
         keep=strings(ann.get("keep"), "annotations.keep"),

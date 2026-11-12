@@ -73,7 +73,7 @@ def test_no_container_commands_or_env_stored(dev_lists, kinds):
 def test_counts_match_rancher(collected_db, dev_lists, open_db):
     from inventory.db.connection import connect
 
-    from inventory.collector.podspec import skip_object
+    from inventory.collector.transform import skip_object
 
     conn = open_db(collected_db.db_path)
     for kind, items in dev_lists.items():
