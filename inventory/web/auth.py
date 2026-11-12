@@ -47,11 +47,12 @@ def hash_password(password: str) -> str:
 def verify_password(password: str, stored: str) -> bool:
     try:
         scheme, n, r, p, salt, digest = stored.split("$")
-        if scheme != "scrypt":
+        n, r, p = int(n), int(r), int(p)
+        if scheme != "scrypt" or not (1 < n <= 2**16 and 1 <= r <= 16 and 1 <= p <= 4):
             return False
-        got = _scrypt(password, bytes.fromhex(salt), int(n), int(r), int(p))
+        got = _scrypt(password, bytes.fromhex(salt), n, r, p)
         return hmac.compare_digest(got, bytes.fromhex(digest))
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, OverflowError, MemoryError):
         return False
 
 

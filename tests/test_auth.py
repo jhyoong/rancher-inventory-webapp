@@ -118,6 +118,8 @@ def test_first_admin_needs_password(db, settings):
 def test_cli_user_flow(monkeypatch, tmp_path, capsys):
     from inventory.cli import main
 
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+
     pw = iter(["cli-password-123", "cli-password-123"])
     monkeypatch.setattr("getpass.getpass", lambda *_: next(pw))
     assert main(["user", "add", "bob", "--role", "viewer"]) == 0
@@ -128,3 +130,46 @@ def test_cli_user_flow(monkeypatch, tmp_path, capsys):
     pw = iter(["short", "short"])
     monkeypatch.setattr("getpass.getpass", lambda *_: next(pw))
     assert main(["user", "passwd", "bob"]) == 1
+
+
+def _session_count(db):
+    return db.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+
+
+def test_set_password_removes_sessions(db):
+    create_user(db, "v", "viewer-password-1", "viewer")
+    login(db, "v", "viewer-password-1", 12, NOW)
+    set_password(db, "v", "another-password-2")
+    assert _session_count(db) == 0
+
+
+def test_set_disabled_removes_sessions(db):
+    create_user(db, "v", "viewer-password-1", "viewer")
+    login(db, "v", "viewer-password-1", 12, NOW)
+    set_disabled(db, "v", True)
+    assert _session_count(db) == 0
+
+
+def test_session_user_checks_disabled_flag(db):
+    create_user(db, "v", "viewer-password-1", "viewer")
+    t = login(db, "v", "viewer-password-1", 12, NOW)
+    db.execute("UPDATE users SET disabled=1 WHERE username='v'")
+    assert _session_count(db) == 1
+    assert session_user(db, t, NOW) is None
+
+
+@pytest.mark.parametrize(
+    "stored",
+    [
+        "",
+        "scrypt$16384$8$1$aa",
+        "scrypt$16384$8$1$zz$zz",
+        "scrypt$notanumber$8$1$aa$bb",
+        "scrypt$99999999999999999999$8$1$aa$bb",
+        "scrypt$1073741824$8$1$aa$bb",
+        "scrypt$16384$99999999$1$aa$bb",
+        "md5$16384$8$1$aa$bb",
+    ],
+)
+def test_verify_password_malformed_is_false(stored):
+    assert verify_password("some-password-123", stored) is False

@@ -64,10 +64,14 @@ def _user_command(args) -> int:
 
     from inventory.db.connection import connect
     from inventory.db.migrate import migrate
-    from inventory.settings import Settings
+    from inventory.settings import ConfigError, Settings
     from inventory.web import auth
 
-    settings = Settings()
+    try:
+        settings = Settings()
+    except ConfigError as e:
+        print(f"config error: {e}", file=sys.stderr)
+        return 1
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     conn = connect(settings.db_path)
     try:
