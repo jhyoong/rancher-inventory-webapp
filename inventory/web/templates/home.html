@@ -6,6 +6,16 @@
   <div class="card"><div class="num">{{ overview.clusters }}</div>Clusters</div>
   <div class="card"><div class="num">{{ overview.nodes }}</div>Nodes</div>
 </div>
+<h2>Clusters per class</h2>
+{% if classes %}
+<div class="cards">
+  {% for k in classes %}
+  <div class="card"><div class="num">{{ k.clusters }}</div><a href="/inventory?cls={{ k.class }}">{{ k.class }}</a></div>
+  {% endfor %}
+</div>
+{% else %}
+<p>No cluster has been classified yet.</p>
+{% endif %}
 <h2>Failed clusters in the last run</h2>
 {% if overview.last_run %}
 <p class="muted">Run <a href="/runs/{{ overview.last_run.id }}">{{ overview.last_run.id }}</a>,

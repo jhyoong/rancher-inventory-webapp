@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Network - Rancher inventory{% endblock %}
+{% macro addr_table(rows, annotations=false) %}
+<table>
+  <tr><th>Site</th><th>Cluster</th><th>Kind</th><th>Namespace</th><th>Name</th><th>Role</th><th>Address</th><th>Ports</th>{% if annotations %}<th>Annotations</th>{% endif %}</tr>
+  {% for r in rows %}
+  <tr><td>{{ r.site }}</td><td><a href="/clusters/{{ r.site }}/{{ r.cluster_id }}">{{ r.cluster }}</a></td><td>{{ r.kind }}</td>
+      <td>{{ r.namespace }}</td><td>{{ r.name }}</td><td>{{ r.role }}</td><td>{{ r.address }}</td><td>{{ r.ports or "" }}</td>
+      {% if annotations %}<td><pre class="cell">{{ r.annotations or "" }}</pre></td>{% endif %}</tr>
+  {% else %}
+  <tr><td colspan="9">None.</td></tr>
+  {% endfor %}
+</table>
+{% endmacro %}
+{% block content %}
+<h1>Network</h1>
+<form method="get" action="/network">
+  <input name="q" value="{{ q }}" placeholder="IP, prefix or hostname" size="30">
+  <button type="submit">Search</button>
+</form>
+{% if q %}
+<h2>Search results for {{ q }}</h2>
+{{ addr_table(results) }}
+{% endif %}
+<h2 id="lb">Load balancers</h2>
+{{ addr_table(load_balancers, true) }}
+<h2 id="ingress">Ingress hosts</h2>
+{{ addr_table(ingress_hosts) }}
+<h2 id="nodes">Node IPs</h2>
+{{ addr_table(node_ips) }}
+<h2 id="services">NodePort and external IP services</h2>
+<table>
+  <tr><th>Site</th><th>Cluster</th><th>Namespace</th><th>Name</th><th>Type</th><th>External IPs</th><th>Ports</th></tr>
+  {% for r in services %}
+  <tr><td>{{ r.site }}</td><td><a href="/clusters/{{ r.site }}/{{ r.cluster_id }}">{{ r.cluster }}</a></td><td>{{ r.namespace }}</td>
+      <td>{{ r.name }}</td><td>{{ r.type }}</td><td>{{ r.external_addresses or "" }}</td><td>{{ r.ports or "" }}</td></tr>
+  {% else %}
+  <tr><td colspan="7">None.</td></tr>
+  {% endfor %}
+</table>
+<h2 id="duplicates">Duplicates across clusters</h2>
+<table>
+  <tr><th>Address</th><th>Role</th><th>Clusters</th><th>Found in</th></tr>
+  {% for r in duplicates %}
+  <tr><td>{{ r.address }}</td><td>{{ r.role }}</td><td class="r">{{ r.clusters }}</td><td>{{ r.where_found }}</td></tr>
+  {% else %}
+  <tr><td colspan="4">None.</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}

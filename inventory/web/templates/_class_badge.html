@@ -1,0 +1,3 @@
+{% macro class_badge(cls) %}<span class="badge class">{{ cls or "unclassified" }}</span>{% endmacro %}
+{% macro flag_badges(p) %}{% if p.stateful %}<span class="badge">stateful</span>{% endif %}{% if p.helm %}<span class="badge">helm</span>{% endif %}{% if p.custom_crds %}<span class="badge">custom_crds</span>{% endif %}{% if p.hostpath %}<span class="badge hostpath">hostpath (warning)</span>{% endif %}{% endmacro %}
+{% macro state(p, admin) %}<span class="muted">last ok {{ p.last_ok_at | dt }}</span>{% if p.failed %} <span class="warn">last collection failed, class may be out of date{% if admin and p.latest_error %}: <span class="error">{{ p.latest_error }}</span>{% endif %}</span>{% endif %}{% endmacro %}

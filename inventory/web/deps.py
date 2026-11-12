@@ -39,7 +39,17 @@ def _secs(s: float | None) -> str:
     return "-" if s is None else f"{s:.1f} s"
 
 
-templates.env.filters.update(dt=_dt, cores=_cores, gib=_gib, secs=_secs)
+def _size(b: int | None) -> str:
+    if b is None:
+        return "-"
+    value = float(b)
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+        if value < 1024 or unit == "TiB":
+            return f"{value:.0f} {unit}" if unit == "B" else f"{value:.1f} {unit}"
+        value /= 1024
+
+
+templates.env.filters.update(dt=_dt, cores=_cores, gib=_gib, secs=_secs, size=_size)
 
 
 def get_settings(request: Request) -> Settings:

@@ -2,9 +2,10 @@ import sqlite3
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
+from inventory.collector.rules import load_rules
 from inventory.web import queries
 from inventory.web.auth import User
-from inventory.web.deps import current_user, read_db, render
+from inventory.web.deps import current_user, get_settings, read_db, render
 
 router = APIRouter()
 
@@ -26,4 +27,18 @@ def cluster(
     if row is None:
         raise HTTPException(404, "cluster not found")
     metrics = queries.cluster_metrics(conn, site, cluster_id)
-    return render(request, conn, user, "cluster.html", c=row, metrics=metrics)
+    rules = load_rules(get_settings(request))
+    return render(
+        request,
+        conn,
+        user,
+        "cluster.html",
+        c=row,
+        metrics=metrics,
+        p=queries.cluster_inventory(conn, site, cluster_id),
+        namespaces=queries.namespace_profiles(conn, site, cluster_id),
+        services=queries.cluster_services(conn, site, cluster_id),
+        ingresses=queries.cluster_ingresses(conn, site, cluster_id),
+        helm=queries.cluster_helm(conn, site, cluster_id),
+        crd_groups=queries.cluster_crd_groups(conn, site, cluster_id, rules),
+    )

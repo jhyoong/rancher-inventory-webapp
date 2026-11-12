@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}CRDs - Rancher inventory{% endblock %}
+{% block content %}
+<h1>CRD groups</h1>
+<p>{% if custom_only %}Showing custom groups only. <a href="/crds">Show all</a>{% else %}Showing all groups. <a href="/crds?custom_only=1">Custom only</a>{% endif %}</p>
+<table>
+  <tr><th>Group</th><th>Clusters</th><th>CRDs</th><th>Custom</th></tr>
+  {% for g in groups %}
+  <tr><td>{{ g.group }}</td><td class="r">{{ g.clusters }}</td><td class="r">{{ g.crds }}</td><td>{{ "yes" if g.custom else "no" }}</td></tr>
+  {% else %}
+  <tr><td colspan="4">None.</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}

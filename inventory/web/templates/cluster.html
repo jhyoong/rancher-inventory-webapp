@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_class_badge.html" import class_badge, flag_badges, state %}
 {% block title %}{{ c.name }} - Rancher inventory{% endblock %}
 {% block content %}
 <h1>{{ c.name }} <span class="muted">({{ c.site }} / {{ c.cluster_id }})</span></h1>
@@ -19,6 +20,76 @@
   <tr><th>Memory GiB alloc / req / used</th><td>{{ c.mem_alloc_b | gib }} / {{ c.mem_req_b | gib }} / {{ c.mem_used_b | gib }}</td></tr>
   <tr><th>Last ok</th><td>{{ c.last_ok_at | dt }}</td></tr>
   {% if user.role == "admin" %}<tr><th>Last error</th><td class="error">{{ c.last_error or "" }}</td></tr>{% endif %}
+</table>
+
+
+<h2>Profile</h2>
+{% if p and p.class %}
+<p>{{ class_badge(p.class) }} {{ flag_badges(p) }} {{ state(p, user.role == "admin") }}</p>
+<table class="facts">
+  <tr><th>StatefulSets (user namespaces)</th><td>{{ p.statefulsets }}</td></tr>
+  <tr><th>Bound PVCs (user namespaces)</th><td>{{ p.pvc_bound }} ({{ p.pvc_bytes | size }})</td></tr>
+  <tr><th>Helm releases (user namespaces)</th><td>{{ p.helm_releases }}</td></tr>
+  <tr><th>LoadBalancer services</th><td>{{ p.lb_services }}</td></tr>
+  <tr><th>Ingresses</th><td>{{ p.ingresses }}</td></tr>
+  <tr><th>CNI and CIDRs</th><td>{{ p.cni }} {{ p.cidrs }}</td></tr>
+  <tr><th>Profile built in run</th><td>{{ p.updated_run }}</td></tr>
+</table>
+{% else %}
+<p>No profile yet. {{ state(p, user.role == "admin") if p }}</p>
+{% endif %}
+
+<h2>Namespaces</h2>
+<table>
+  <tr><th>Namespace</th><th>System</th><th>Workloads</th><th>StatefulSets</th><th>Bound PVCs</th><th>PVC size</th>
+      <th>Hostpath workloads</th><th>Helm releases</th><th>LB services</th><th>Ingresses</th><th>Custom annotations</th></tr>
+  {% for n in namespaces %}
+  <tr><td>{{ n.namespace }}</td><td>{{ "yes" if n.is_system else "no" }}</td><td class="r">{{ n.workloads }}</td><td class="r">{{ n.statefulsets }}</td>
+      <td class="r">{{ n.pvc_bound }}</td><td class="r">{{ n.pvc_bytes | size }}</td><td class="r">{{ n.hostpath_workloads }}</td>
+      <td class="r">{{ n.helm_releases }}</td><td class="r">{{ n.lb_services }}</td><td class="r">{{ n.ingresses }}</td><td class="r">{{ n.custom_annotations }}</td></tr>
+  {% else %}
+  <tr><td colspan="11">None.</td></tr>
+  {% endfor %}
+</table>
+
+<h2>Services</h2>
+<table>
+  <tr><th>Namespace</th><th>Name</th><th>Type</th><th>Addresses</th></tr>
+  {% for s in services %}
+  <tr><td>{{ s.namespace }}</td><td>{{ s.name }}</td><td>{{ s.type or "" }}</td><td>{{ s.addresses or "" }}</td></tr>
+  {% else %}
+  <tr><td colspan="4">None.</td></tr>
+  {% endfor %}
+</table>
+
+<h2>Ingresses</h2>
+<table>
+  <tr><th>Namespace</th><th>Name</th><th>Hosts</th><th>Load balancer</th></tr>
+  {% for i in ingresses %}
+  <tr><td>{{ i.namespace }}</td><td>{{ i.name }}</td><td>{{ i.hosts or "" }}</td><td>{{ i.lbs or "" }}</td></tr>
+  {% else %}
+  <tr><td colspan="4">None.</td></tr>
+  {% endfor %}
+</table>
+
+<h2>Helm releases</h2>
+<table>
+  <tr><th>Namespace</th><th>Release</th><th>Chart</th><th>Version</th><th>Status</th></tr>
+  {% for h in helm %}
+  <tr><td>{{ h.namespace }}</td><td>{{ h.name }}</td><td>{{ h.chart }}</td><td>{{ h.version }}</td><td>{{ h.status or "" }}</td></tr>
+  {% else %}
+  <tr><td colspan="5">None.</td></tr>
+  {% endfor %}
+</table>
+
+<h2>Custom CRD groups</h2>
+<table>
+  <tr><th>Group</th><th>CRDs</th></tr>
+  {% for g in crd_groups %}
+  <tr><td>{{ g.group }}</td><td class="r">{{ g.crds }}</td></tr>
+  {% else %}
+  <tr><td colspan="2">None.</td></tr>
+  {% endfor %}
 </table>
 
 <h2>Usage per day</h2>

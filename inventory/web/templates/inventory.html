@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% from "_class_badge.html" import class_badge, flag_badges, state %}
+{% block title %}Inventory - Rancher inventory{% endblock %}
+{% block content %}
+<h1>Inventory</h1>
+<form method="get" action="/inventory">
+  <label>Site <select name="site"><option value="">any</option>
+    {% for s in options.sites %}<option {% if f.site == s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></label>
+  <label>Class <select name="cls"><option value="">any</option>
+    {% for s in options.classes %}<option {% if f.cls == s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></label>
+  <label>Flag <select name="flag"><option value="">any</option>
+    {% for s in options.flags %}<option {% if f.flag == s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></label>
+  <label>Cluster label <input name="label" value="{{ f.label }}" placeholder="key or key=value"></label>
+  <button type="submit">Filter</button>
+</form>
+<table>
+  <tr><th>Site</th><th>Cluster</th><th>Class</th><th>Flags</th><th>Kubernetes</th><th>Nodes</th><th>StatefulSets</th>
+      <th>Bound PVCs</th><th>Capacity</th><th>Helm releases</th><th>Custom CRD groups</th><th>LB services</th>
+      <th>Ingresses</th><th>CNI</th><th>CIDRs</th></tr>
+  {% for r in rows %}
+  <tr>
+    <td>{{ r.site }}</td>
+    <td><a href="/clusters/{{ r.site }}/{{ r.cluster_id }}">{{ r.name }}</a><br>{{ state(r, user.role == "admin") }}</td>
+    <td>{{ class_badge(r.class) }}</td>
+    <td>{% if r.class %}{{ flag_badges(r) }}{% endif %}</td>
+    <td>{{ r.k8s_version or "-" }}</td>
+    <td class="r">{{ r.node_count if r.node_count is not none else "-" }}</td>
+    <td class="r">{{ r.statefulsets if r.statefulsets is not none else "-" }}</td>
+    <td class="r">{{ r.pvc_bound if r.pvc_bound is not none else "-" }}</td>
+    <td class="r">{{ r.pvc_bytes | size }}</td>
+    <td class="r">{{ r.helm_releases if r.helm_releases is not none else "-" }}</td>
+    <td class="r" title="{{ r.crd_group_list | join(', ') }}">{{ r.crd_group_count }}</td>
+    <td class="r">{{ r.lb_services if r.lb_services is not none else "-" }}</td>
+    <td class="r">{{ r.ingresses if r.ingresses is not none else "-" }}</td>
+    <td>{{ r.cni }}</td>
+    <td>{{ r.cidrs }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="15">No clusters match.</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}

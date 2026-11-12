@@ -232,3 +232,319 @@ def check_preset(conn: sqlite3.Connection, preset_id: int) -> list[dict]:
             {"site": site, "cluster_id": cid, "name": c["name"], "result": result, "reason": reason}
         )
     return out
+
+
+# ---- inventory views ----
+
+FLAG_COLUMNS = {"stateful": "p.stateful", "helm": "p.helm", "custom_crds": "p.custom_crds", "hostpath": "p.hostpath"}
+
+_INVENTORY_SQL = """
+SELECT c.site, c.cluster_id, c.name, c.k8s_version, c.node_count, c.last_ok_at, c.labels,
+       p.class, p.stateful, p.helm, p.custom_crds, p.hostpath,
+       p.statefulsets, p.pvc_bound, p.pvc_bytes, p.helm_releases, p.crd_groups,
+       p.lb_services, p.ingresses, p.network, p.updated_run,
+       (SELECT rc.status FROM run_clusters rc WHERE rc.site = c.site AND rc.cluster_id = c.cluster_id
+        ORDER BY rc.run_id DESC LIMIT 1) AS latest_status,
+       (SELECT rc.error FROM run_clusters rc WHERE rc.site = c.site AND rc.cluster_id = c.cluster_id
+        ORDER BY rc.run_id DESC LIMIT 1) AS latest_error
+FROM clusters c
+LEFT JOIN cluster_profile p ON p.site = c.site AND p.cluster_id = c.cluster_id
+"""
+
+
+def _decode_profile(d: dict) -> dict:
+    import json
+
+    groups = json.loads(d["crd_groups"]) if d.get("crd_groups") else []
+    net = json.loads(d["network"]) if d.get("network") else {}
+    d["crd_group_list"] = groups
+    d["crd_group_count"] = len(groups)
+    d["cni"] = net.get("cni") or ""
+    d["cidrs"] = ", ".join(v for v in (net.get("cluster_cidr"), net.get("service_cidr")) if v)
+    d["failed"] = d.get("latest_status") == "failed"
+    return d
+
+
+def inventory_rows(conn, site=None, cls=None, flag=None, label=None) -> list[dict]:
+    parts: list[str] = []
+    params: dict = {}
+    if site:
+        parts.append("c.site = :site")
+        params["site"] = site
+    if cls:
+        parts.append("p.class = :cls")
+        params["cls"] = cls
+    if flag:
+        if flag not in FLAG_COLUMNS:
+            raise ValueError(f"unknown flag: {flag}")
+        parts.append(f"{FLAG_COLUMNS[flag]} = 1")  # column comes from the fixed map above
+    if label:
+        lkey, sep, lvalue = label.partition("=")
+        cond = "key = :label_key"
+        params["label_key"] = lkey
+        if sep:
+            cond += " AND value = :label_value"
+            params["label_value"] = lvalue
+        parts.append(f"EXISTS (SELECT 1 FROM json_each(c.labels) WHERE {cond})")
+    where = " WHERE " + " AND ".join(parts) if parts else ""
+    rows = conn.execute(_INVENTORY_SQL + where + " ORDER BY c.site, c.name", params).fetchall()
+    return [_decode_profile(dict(r)) for r in rows]
+
+
+def inventory_filter_options(conn) -> dict:
+    return {
+        "sites": [r[0] for r in conn.execute("SELECT DISTINCT site FROM clusters ORDER BY site")],
+        "classes": [r[0] for r in conn.execute("SELECT DISTINCT class FROM cluster_profile ORDER BY class")],
+        "flags": list(FLAG_COLUMNS),
+    }
+
+
+def clusters_per_class(conn) -> list[dict]:
+    rows = conn.execute(
+        "SELECT p.class, COUNT(*) AS clusters FROM cluster_profile p"
+        " JOIN clusters c ON c.site = p.site AND c.cluster_id = p.cluster_id"
+        " GROUP BY p.class ORDER BY p.class"
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def cluster_inventory(conn, site: str, cluster_id: str) -> dict | None:
+    row = conn.execute(
+        _INVENTORY_SQL + " WHERE c.site = ? AND c.cluster_id = ?", (site, cluster_id)
+    ).fetchone()
+    return _decode_profile(dict(row)) if row else None
+
+
+def namespace_profiles(conn, site: str, cluster_id: str) -> list[dict]:
+    rows = conn.execute(
+        "SELECT * FROM namespace_profile WHERE site=? AND cluster_id=? ORDER BY is_system, namespace",
+        (site, cluster_id),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ---- network ----
+
+
+def _like_escape(q: str) -> str:
+    return q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def search_addresses(conn, q: str) -> list[dict]:
+    q = q.strip()
+    if not q:
+        return []
+    rows = conn.execute(
+        """SELECT r.site, c.name AS cluster, r.cluster_id, r.kind, r.namespace, r.name,
+                  a.role, a.address, a.ports
+           FROM addresses a
+           JOIN resources r ON r.id = a.resource_id
+           JOIN clusters  c ON c.site = r.site AND c.cluster_id = r.cluster_id
+           WHERE a.address = :q OR a.address LIKE :like ESCAPE '\\'
+           ORDER BY r.site, c.name, r.kind, r.namespace, r.name, a.address""",
+        {"q": q, "like": _like_escape(q) + "%"},
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+_ADDR_SQL = """
+SELECT r.site, c.name AS cluster, r.cluster_id, r.kind, r.namespace, r.name,
+       a.role, a.address, a.ports{extra}
+FROM addresses a
+JOIN resources r ON r.id = a.resource_id
+JOIN clusters c ON c.site = r.site AND c.cluster_id = r.cluster_id
+WHERE {where}
+ORDER BY r.site, c.name, a.address, r.namespace, r.name
+"""
+
+
+def _addr_rows(conn, where: str, extra: str = "", params: tuple = ()) -> list[dict]:
+    sql = _ADDR_SQL.format(where=where, extra=extra)
+    return [dict(r) for r in conn.execute(sql, params).fetchall()]
+
+
+def load_balancers(conn) -> list[dict]:
+    return _addr_rows(
+        conn,
+        "a.role IN ('lb', 'ingress-lb')",
+        extra=""", (SELECT group_concat(an.key || '=' || an.value, char(10))
+                    FROM resource_annotations an WHERE an.resource_id = r.id) AS annotations""",
+    )
+
+
+def ingress_hosts(conn) -> list[dict]:
+    return _addr_rows(conn, "a.role = 'ingress-host'")
+
+
+def node_ips(conn) -> list[dict]:
+    return _addr_rows(conn, "a.role IN ('node-internal', 'node-external')")
+
+
+def nodeport_and_external_services(conn) -> list[dict]:
+    rows = conn.execute(
+        """SELECT r.site, c.name AS cluster, r.cluster_id, r.namespace, r.name,
+                  json_extract(r.data, '$.spec.type') AS type,
+                  json_extract(r.data, '$.spec.externalIPs') AS external_ips,
+                  (SELECT group_concat(a.address, ', ') FROM addresses a
+                   WHERE a.resource_id = r.id AND a.role = 'external-ip') AS external_addresses,
+                  (SELECT group_concat(a.ports, ', ') FROM addresses a
+                   WHERE a.resource_id = r.id AND a.role = 'external-ip') AS ports
+           FROM resources r
+           JOIN clusters c ON c.site = r.site AND c.cluster_id = r.cluster_id
+           WHERE r.kind = 'services'
+             AND (json_extract(r.data, '$.spec.type') = 'NodePort'
+                  OR EXISTS (SELECT 1 FROM addresses a WHERE a.resource_id = r.id AND a.role = 'external-ip'))
+           ORDER BY r.site, c.name, r.namespace, r.name"""
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def duplicate_addresses(conn) -> list[dict]:
+    rows = conn.execute(
+        """SELECT a.address, a.role, COUNT(DISTINCT r.site || '/' || r.cluster_id) AS clusters,
+                  group_concat(DISTINCT r.site || '/' || c.name) AS where_found
+           FROM addresses a
+           JOIN resources r ON r.id = a.resource_id
+           JOIN clusters c ON c.site = r.site AND c.cluster_id = r.cluster_id
+           WHERE a.role IN ('lb', 'ingress-lb', 'ingress-host')
+           GROUP BY a.address, a.role
+           HAVING clusters > 1
+           ORDER BY a.address"""
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ---- helm, crds, annotations ----
+
+_HELM_CHART = "coalesce(json_extract(r.data, '$.spec.chart.metadata.name'), json_extract(r.data, '$.spec.name'), r.name)"
+_HELM_VERSION = "coalesce(json_extract(r.data, '$.spec.chart.metadata.version'), '')"
+
+
+def helm_charts(conn) -> list[dict]:
+    """One row per chart: release and cluster counts, with the clusters per chart version."""
+    rows = conn.execute(
+        f"""SELECT {_HELM_CHART} AS chart, {_HELM_VERSION} AS version,
+                   COUNT(*) AS releases, COUNT(DISTINCT r.site || '/' || r.cluster_id) AS clusters
+            FROM resources r WHERE r.kind = 'helmreleases'
+            GROUP BY chart, version ORDER BY chart, version"""
+    ).fetchall()
+    totals = conn.execute(
+        f"""SELECT {_HELM_CHART} AS chart, COUNT(*) AS releases,
+                   COUNT(DISTINCT r.site || '/' || r.cluster_id) AS clusters
+            FROM resources r WHERE r.kind = 'helmreleases' GROUP BY chart ORDER BY chart"""
+    ).fetchall()
+    out = {t["chart"]: {"chart": t["chart"], "releases": t["releases"], "clusters": t["clusters"], "versions": []} for t in totals}
+    for r in rows:
+        out[r["chart"]]["versions"].append(
+            {"version": r["version"], "clusters": r["clusters"], "releases": r["releases"]}
+        )
+    return list(out.values())
+
+
+def helm_releases(conn, chart: str) -> list[dict]:
+    rows = conn.execute(
+        f"""SELECT r.site, c.name AS cluster, r.cluster_id, r.namespace, r.name,
+                   {_HELM_VERSION} AS version,
+                   json_extract(r.data, '$.spec.chart.metadata.appVersion') AS app_version,
+                   json_extract(r.data, '$.spec.info.status') AS status,
+                   json_extract(r.data, '$.spec.info.lastDeployed') AS last_deployed
+            FROM resources r JOIN clusters c ON c.site = r.site AND c.cluster_id = r.cluster_id
+            WHERE r.kind = 'helmreleases' AND {_HELM_CHART} = ?
+            ORDER BY r.site, c.name, r.namespace, r.name""",
+        (chart,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def crd_groups(conn, custom_only: bool, rules) -> list[dict]:
+    from inventory.collector.classify import is_system_crd_group
+
+    rows = conn.execute(
+        """SELECT json_extract(r.data, '$.spec.group') AS grp, COUNT(*) AS crds,
+                  COUNT(DISTINCT r.site || '/' || r.cluster_id) AS clusters
+           FROM resources r WHERE r.kind = 'customresourcedefinitions' AND grp IS NOT NULL
+           GROUP BY grp ORDER BY clusters DESC, grp"""
+    ).fetchall()
+    out = [
+        {"group": r["grp"], "crds": r["crds"], "clusters": r["clusters"], "custom": not is_system_crd_group(r["grp"], rules)}
+        for r in rows
+    ]
+    return [g for g in out if g["custom"]] if custom_only else out
+
+
+def annotation_keys(conn) -> list[dict]:
+    rows = conn.execute(
+        """SELECT a.key, COUNT(*) AS objects, COUNT(DISTINCT r.site || '/' || r.cluster_id) AS clusters
+           FROM resource_annotations a JOIN resources r ON r.id = a.resource_id
+           WHERE a.custom = 1 GROUP BY a.key ORDER BY clusters DESC, a.key"""
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def annotation_objects(conn, key: str, limit: int = 5000) -> list[dict]:
+    rows = conn.execute(
+        """SELECT r.site, c.name AS cluster, r.cluster_id, r.kind, r.namespace, r.name, a.value
+           FROM resource_annotations a
+           JOIN resources r ON r.id = a.resource_id
+           JOIN clusters c ON c.site = r.site AND c.cluster_id = r.cluster_id
+           WHERE a.key = ? AND a.custom = 1
+           ORDER BY r.site, c.name, r.kind, r.namespace, r.name LIMIT ?""",
+        (key, limit),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ---- cluster page extras ----
+
+
+def cluster_services(conn, site: str, cluster_id: str) -> list[dict]:
+    rows = conn.execute(
+        """SELECT r.namespace, r.name, json_extract(r.data, '$.spec.type') AS type,
+                  (SELECT group_concat(a.address, ', ') FROM addresses a
+                   WHERE a.resource_id = r.id AND a.role IN ('lb', 'external-ip')) AS addresses
+           FROM resources r WHERE r.site=? AND r.cluster_id=? AND r.kind='services'
+           ORDER BY r.namespace, r.name""",
+        (site, cluster_id),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def cluster_ingresses(conn, site: str, cluster_id: str) -> list[dict]:
+    rows = conn.execute(
+        """SELECT r.namespace, r.name,
+                  (SELECT group_concat(a.address, ', ') FROM addresses a
+                   WHERE a.resource_id = r.id AND a.role = 'ingress-host') AS hosts,
+                  (SELECT group_concat(a.address, ', ') FROM addresses a
+                   WHERE a.resource_id = r.id AND a.role = 'ingress-lb') AS lbs
+           FROM resources r WHERE r.site=? AND r.cluster_id=? AND r.kind='ingresses'
+           ORDER BY r.namespace, r.name""",
+        (site, cluster_id),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def cluster_helm(conn, site: str, cluster_id: str) -> list[dict]:
+    rows = conn.execute(
+        f"""SELECT r.namespace, r.name, {_HELM_CHART} AS chart, {_HELM_VERSION} AS version,
+                   json_extract(r.data, '$.spec.info.status') AS status
+            FROM resources r WHERE r.site=? AND r.cluster_id=? AND r.kind='helmreleases'
+            ORDER BY r.namespace, r.name""",
+        (site, cluster_id),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def cluster_crd_groups(conn, site: str, cluster_id: str, rules) -> list[dict]:
+    from inventory.collector.classify import is_system_crd_group
+
+    rows = conn.execute(
+        """SELECT json_extract(r.data, '$.spec.group') AS grp, COUNT(*) AS crds
+           FROM resources r WHERE r.site=? AND r.cluster_id=? AND r.kind='customresourcedefinitions'
+           GROUP BY grp ORDER BY grp""",
+        (site, cluster_id),
+    ).fetchall()
+    return [
+        {"group": r["grp"], "crds": r["crds"]}
+        for r in rows
+        if r["grp"] and not is_system_crd_group(r["grp"], rules)
+    ]

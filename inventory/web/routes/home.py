@@ -11,4 +11,7 @@ router = APIRouter()
 
 @router.get("/")
 def home(request: Request, conn: sqlite3.Connection = Depends(read_db), user: User = Depends(current_user)):
-    return render(request, conn, user, "home.html", overview=queries.overview(conn))
+    return render(
+        request, conn, user, "home.html", overview=queries.overview(conn),
+        classes=queries.clusters_per_class(conn),
+    )

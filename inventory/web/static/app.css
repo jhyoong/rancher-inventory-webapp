@@ -27,3 +27,7 @@ button { cursor: pointer; }
 .login label { display: block; margin-bottom: 0.6rem; }
 .login input { display: block; width: 100%; box-sizing: border-box; }
 #progress { display: inline-flex; gap: 0.5rem; align-items: center; }
+.badge { display: inline-block; padding: 0 0.4rem; border-radius: 0.6rem; background: #e3e8f0; font-size: 0.85rem; margin-right: 0.2rem; }
+.badge.class { background: #dbe7f7; }
+.badge.hostpath { background: #fff4d6; color: #8a5a00; }
+pre.cell { margin: 0; font-size: 0.8rem; white-space: pre-wrap; }
