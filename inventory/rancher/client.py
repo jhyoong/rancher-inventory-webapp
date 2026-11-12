@@ -72,7 +72,14 @@ class RancherClient:
             if token:
                 params["continue"] = token
             data = await self.get_json(url, params)
-            items.extend(data.get("items") or [])
+            page = data.get("items") if isinstance(data, dict) else None
+            if not isinstance(page, list):
+                # null items is a valid empty list; anything else is not a list response
+                if isinstance(data, dict) and "items" in data and page is None:
+                    page = []
+                else:
+                    raise RancherError(f"no items list in response from {self._base}{url}", 200, f"{self._base}{url}")
+            items.extend(page)
             token = (data.get("metadata") or {}).get("continue") or ""
             if not token:
                 return items

@@ -65,3 +65,10 @@ def test_unknown_group_404(dev_site, settings):
 def test_token_not_in_error(dev_site, settings):
     err = _error(dev_site, settings, "/api/v1/secrets")
     assert site_token(dev_site) not in str(err)
+
+
+@pytest.mark.live
+def test_list_kind_without_items_is_an_error(live_loop, live_client):
+    """A 200 JSON body with no items list must not look like an empty kind."""
+    with pytest.raises(RancherError, match="no items list"):
+        live_loop.run_until_complete(live_client.list_kind("local", "/version"))
