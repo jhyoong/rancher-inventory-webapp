@@ -158,3 +158,53 @@ def test_healthcheck_cli_fails_without_server(monkeypatch):
     monkeypatch.setenv("LISTEN_PORT", "1")  # nothing listens here
     monkeypatch.setenv("TLS_CERT_FILE", "")
     assert main(["healthcheck"]) == 1
+
+
+def _all_routes(routes):
+    for r in routes:
+        if hasattr(r, "original_router"):  # included routers
+            yield from _all_routes(r.original_router.routes)
+        else:
+            yield r
+
+
+def _concrete(path: str) -> str:
+    values = {"site": "dev", "cluster_id": "local", "run_id": "1", "preset_id": "1"}
+    return re.sub(r"\{(\w+)\}", lambda m: values[m.group(1)], path)
+
+
+PUBLIC = {"/login", "/static", "/healthz"}
+
+
+def test_every_route_needs_a_session(client):
+    gets, posts = [], []
+    for r in _all_routes(client.app.routes):
+        if r.path in PUBLIC:
+            continue
+        methods = getattr(r, "methods", None) or set()
+        if "GET" in methods:
+            gets.append(_concrete(r.path))
+        if "POST" in methods:
+            posts.append(_concrete(r.path))
+    assert "/network" in gets and "/runs" in posts  # the walk found the routers
+    for path in gets:
+        r = client.get(path, follow_redirects=False)
+        assert r.status_code == 303 and r.headers["location"] == "/login", path
+        r = client.get(path, headers={"HX-Request": "true"}, follow_redirects=False)
+        assert r.status_code == 401 and r.headers["hx-redirect"] == "/login", path
+    for path in posts:
+        r = client.post(path, data={"csrf": "x"}, follow_redirects=False)
+        assert r.status_code in (303, 401, 403), path
+        if r.status_code == 303:
+            assert r.headers["location"] == "/login", path
+
+
+def test_refresh_with_stopped_collector_is_503(admin_client, web_settings):
+    from inventory.collector.thread import CollectorThread
+
+    t = CollectorThread(web_settings)
+    t.start()
+    t.stop(timeout=5)
+    admin_client.app.state.collector = t
+    r = admin_client.post("/runs", data={"csrf": admin_client.csrf}, follow_redirects=False)
+    assert r.status_code == 503

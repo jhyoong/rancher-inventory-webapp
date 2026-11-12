@@ -82,7 +82,10 @@ def optional_user(request: Request, conn: sqlite3.Connection = Depends(read_db))
 def current_user(request: Request, user: User | None = Depends(optional_user)) -> User:
     if user is not None:
         return user
-    if request.headers.get("HX-Request") or request.url.path.startswith("/api/"):
+    if request.headers.get("HX-Request"):
+        # HTMX follows HX-Redirect with a full page load instead of swapping an error in.
+        raise HTTPException(401, "login required", headers={"HX-Redirect": "/login"})
+    if request.url.path.startswith("/api/"):
         raise HTTPException(401, "login required")
     raise HTTPException(303, headers={"Location": "/login"})
 

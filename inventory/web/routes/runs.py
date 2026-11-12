@@ -58,6 +58,8 @@ def _start(request: Request, conn: sqlite3.Connection, user: User, scope: Scope)
         raise HTTPException(409, f"run {e.run_id} is in progress") from None
     except ValueError as e:
         raise HTTPException(400, str(e)) from None
+    except RuntimeError:  # collector is stopping
+        raise HTTPException(503, "collector is not running") from None
     log.info("run %s started by user=%s scope=%s", run_id, user.username, scope.to_json())
     if request.headers.get("HX-Request"):
         return render(request, conn, user, "_progress.html")
