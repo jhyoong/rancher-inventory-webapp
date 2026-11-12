@@ -40,7 +40,8 @@ def test_system_namespace(ns, system, rules):
 
 @pytest.mark.parametrize("group,system", [
     ("fleet.cattle.io", True), ("networking.k8s.io", True), ("cilium.io", True),
-    ("kagent.dev", False),
+    ("kagent.dev", False), ("crd.projectcalico.org", True), ("metallb.io", True),
+    ("addons.metallb.io", True), ("notmetallb.io", False),
 ])
 def test_system_crd_group(group, system, rules):
     assert is_system_crd_group(group, rules) is system
@@ -102,8 +103,11 @@ def _expected(dev_lists, rules):
 
     users = {n: r for n, r in ns.items() if user(n)}
     stateful_ns = {n for n, r in users.items() if r["statefulsets"] or r["pvc_bound"]}
+    def system_group(g):
+        return any(g == p or g.endswith("." + p) or fnmatchcase(g, p) for p in rules.system_crd_groups)
+
     groups = sorted({c["spec"]["group"] for c in dev_lists["customresourcedefinitions"]
-                     if not any(fnmatchcase(c["spec"]["group"], p) for p in rules.system_crd_groups)})
+                     if not system_group(c["spec"]["group"])})
     flags = Flags(
         has_workloads=any(r["workloads"] for r in users.values()),
         stateful=bool(stateful_ns),

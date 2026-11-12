@@ -27,8 +27,13 @@ def is_system_namespace(ns: str, rules: Rules) -> bool:
     return _matches(ns, rules.system_namespaces)
 
 
+def crd_group_matches(group: str, entry: str) -> bool:
+    """True when the group fnmatches the entry, equals it, or is a subdomain of it."""
+    return group == entry or group.endswith("." + entry) or fnmatchcase(group, entry)
+
+
 def is_system_crd_group(group: str, rules: Rules) -> bool:
-    return _matches(group, rules.system_crd_groups)
+    return any(crd_group_matches(group, e) for e in rules.system_crd_groups)
 
 
 def class_label(f: Flags) -> str:
