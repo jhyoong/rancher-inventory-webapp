@@ -22,11 +22,23 @@
 - `export_name_map` is never inside the bundle.
 - The airgap image is built for `linux/amd64` unless the airgap VM is found to be arm64.
 
+## State after plan 1 (merged to main 2026-11-12)
+
+- 189 tests pass; live tests read the dev Rancher (`rancher.local` must be in `/etc/hosts`; on the Mac each new connection costs about 5 s for the `.local` lookup, so reuse one client per test session).
+- Real module names to build on: `inventory/rancher/client.py` (`RancherClient`, `RancherError`), `inventory/collector/{transform,cluster,runner,thread,classify,rules,annotations,addresses,units,kinds}.py`, `inventory/db/{connection,migrate,repo}.py`, `inventory/web/{app,deps,auth,queries}.py`, routes in `inventory/web/routes/` (one module per page group), templates in `inventory/web/templates/`.
+- Test fixtures in `tests/conftest.py`: `settings`, `dev_site`, `db`, `db_path`, `dev_live`, `dev_clusters`, `local_cluster`, `live_loop`, `live_client`, `kinds`, `dev_lists`, `collected_db` (session tmp DB after one real run), `client`, `admin_client`, `viewer_client`, `admin_client_collected`.
+- `transform.trim` stores keep paths nested in `data`; derived fields use the `_DERIVE` table in `transform.py`. New derive helpers in this plan register there.
+- `cluster_profile` counts for StatefulSets, PVCs and Helm releases cover user namespaces only.
+- Clusters missing from a full-scope run's cluster list are deleted (daily metrics history kept).
+- Dev `local` is classed `stateful-helm-crd`. Still counted as custom CRD groups: `operator.tigera.io`, `kagent.dev`, `cluster.x-k8s.io`, `addons.cluster.x-k8s.io`, `ipam.cluster.x-k8s.io`, `runtime.cluster.x-k8s.io`.
+- Known spec deviation kept from plan 1: data is committed per cluster and kind, not per cluster, so during a run (or after an interrupted one) a cluster can show new data for some kinds and old data for others. The stale-row rule is unaffected. Document this in the README in Task 12; do not change it.
+- Tests that need a "failed" or "removed" state copy real collected rows in a tmp DB and change one status row; this is accepted under the no-synthetic-data rule. Literal hand-built Kubernetes objects are not.
+
 ## Prerequisites (before Task 1)
 
 These come from the user. Tasks that need them say so.
 
-1. **`k8s-discovery.sh` 1.0.0** copied into `reference/k8s-discovery.sh`. Tasks 4, 7 and 9 copy its CSV file names, column names and hashing rules from it. Without it those tasks cannot be written exactly.
+1. **`k8s-discovery.sh` 1.0.0** in `reference/k8s-discovery.sh`. Done (committed). Tasks 4, 7 and 8 copy its CSV file names, column names and hashing rules from it.
 2. **An admin kubeconfig for the dev `local` cluster** (download from Rancher), used only on the dev Mac to run the script with `--clear-names` and to run `helm list -A` for comparison. Not used by the app.
 3. **Airgap test host details:** CPU architecture, Docker or Podman, how files are carried across.
 
@@ -37,6 +49,7 @@ These come from the user. Tasks that need them say so.
 3. **Export leaking real names.** A cluster name, node name, internal IP or a string from `EXPORT_SENSITIVE_STRINGS` in any CSV blocks the download. Test in Task 9.
 4. **Opt-in switched off.** With every opt-in disabled, no request goes to their endpoints. Test in Task 10.
 5. **Rancher-generated RBAC counted as custom.** The `rancher_generated` filter must exclude the roles Rancher creates on `local`, or the "custom roles" count is meaningless. Test in Task 5.
+6. **A truncated cluster list deleting real clusters.** Since plan 1, a full run deletes clusters not in the site's list. `list_clusters` must read every page, or removal must be skipped. Test in Task 0A.
 
 ## File Structure
 
@@ -58,6 +71,83 @@ inventory/cli.py                            + backup, export-discovery
 reference/k8s-discovery.sh                  from the user
 deploy/inventory-reader-extended.yaml       second RoleTemplate
 ```
+
+---
+
+## Carry-over from plan 1
+
+Items the plan 1 reviews deferred. Do Tasks 0A to 0C first; they touch code the later tasks build on. Items that belong to a later task are listed there instead (Tasks 7 and 12).
+
+### Task 0A: Collector robustness
+
+**Files:**
+- Modify: `inventory/rancher/client.py`, `inventory/collector/runner.py`, `inventory/collector/thread.py`, `inventory/collector/units.py`, `inventory/collector/rules.py`, `inventory/collector/transform.py`, `inventory/db/connection.py`, `inventory/db/migrate.py`
+- Test: `tests/test_rancher_client.py`, `tests/test_runner.py`, `tests/test_units.py`, `tests/test_annotations.py`, `tests/test_db.py`
+
+**Interfaces:**
+- `RancherClient.list_clusters()` follows `pagination.next` until absent and returns every cluster. It raises `RancherError` if a page fails, so removal never runs on a partial list.
+- `list_kind` raises `RancherError` when a `continue` token repeats (loop guard).
+- `whoami()` and `list_clusters()` raise `RancherError` (not `KeyError`) on an unexpected body.
+- `parse_cpu` accepts `k`, `M`, `G` suffixes. `repo.transaction` rolls back if `COMMIT` fails.
+- `load_rules`: a key missing from an override `rules.yaml` falls back to the built-in default for that key (so an override without `drop` still drops `last-applied-configuration`). `yaml.YAMLError` and `OSError` become `ConfigError` naming the file. `max_value_chars` must be at least 1; empty rule entries are rejected.
+- `_derive_crd` and `_derive_helmrelease` drop the field (store nothing) when `spec.versions` or `spec.resources` is not a list.
+- `migrate` raises `ConfigError("database schema N is newer than this image (M)")` when `user_version > SCHEMA_VERSION`. `SCHEMA_VERSION` equals the highest migration file number (test).
+- `connect(readonly=True)` builds the URI with `Path.as_uri()` so paths with `?`, `#`, `%` work. `run_readonly_query` raises `ValueError` when given a writer connection (check `PRAGMA query_only` or the connection flag).
+- `CollectorThread`: if a scheduled start raises, retry every 60 s until the start succeeds or the next day's start arrives (today's run is not skipped). `request_run` after `stop()` never leaves a `running` row (create the row only after the loop-alive check, under the same lock).
+
+- [ ] **Step 1: Write the failing tests**
+  - `test_list_clusters_reads_all_pages` (live): `list_clusters` with page limit 1 (pass `limit=1` through a `page_size` parameter) returns the same ids as the default call.
+  - `test_removal_skipped_when_listing_fails` (live, copied real rows as in plan 1): a site whose token is invalid keeps its stored clusters after a full run.
+  - `test_bad_continue_token_is_error` (live): `get_json("/k8s/clusters/local/api/v1/pods", params={"limit": 1, "continue": "bogus"})` raises `RancherError` with a 4xx status. Together with the existing rule (any page error leaves the kind un-deleted), this covers Review Focus 1 of plan 1 without a test hook in app code.
+  - `test_override_rules_fall_back_per_key`, `test_bad_yaml_is_config_error`, `test_schema_newer_than_image`, `test_schema_version_matches_files`, `test_readonly_query_rejects_writer`, `test_parse_cpu_k_suffix`.
+- [ ] **Step 2: Run, see them fail, implement, run, see them pass**
+- [ ] **Step 3: Commit** — `git commit -m "fix: collector robustness carry-over from plan 1"`
+
+### Task 0B: Web and auth fixes
+
+**Files:**
+- Modify: `inventory/web/auth.py`, `inventory/web/deps.py`, `inventory/web/queries.py`, `inventory/web/routes/{auth,admin,runs,clusters,inventory,presets,check}.py`, templates `base.html`, `cluster.html`, `clusters.html`, `run.html`, `inventory.html`, `network.html`, new `error.html`; `inventory/cli.py`
+- Test: `tests/test_auth.py`, `tests/test_web_core.py`, `tests/test_web_inventory.py`
+
+**Interfaces:**
+- Lockout is atomic: the failure insert and the count happen in one `BEGIN IMMEDIATE` transaction, re-checked after the scrypt verify. `login_failures` rows older than 15 minutes are deleted on every login attempt.
+- Usernames are stripped and lower-cased on create and on login.
+- Log lines with a user-supplied username use `%r`.
+- An admin who resets their own password on `/admin/users` gets a fresh session (stays logged in) with a notice.
+- `GET /` and the clusters page gain a "Refresh this site" button (admin) that posts `site`.
+- `POST /runs/{id}/cancel` on a finished or unknown run shows a message on the runs page instead of a bare redirect or 404.
+- `serve` and `healthcheck` exit 1 with a plain message when only one of `TLS_CERT_FILE` / `TLS_KEY_FILE` is set.
+- HTML error pages (`error.html`) for 400, 403, 404, 409, 500 and 503 on normal page requests; JSON stays for `/healthz` and `/api/*`.
+- The failed marker on `/inventory` and the cluster page uses the newest `run_clusters` row that is `ok` or `failed` (a `running` row no longer hides an earlier failure).
+- Daemonsets show `status.numberReady` / `status.desiredNumberScheduled`; add both to the daemonset keep list and stop keeping `spec.replicas` / `status.readyReplicas` for daemonsets.
+- `_dt` returns the raw string when it cannot parse a time. Malformed `clusters.labels` JSON is treated as `{}` in the label filter (use `json_valid`).
+- `annotation_objects` shows a note when it hits its 5,000-row cap.
+- Response header `X-Frame-Options: DENY` on every page.
+
+- [ ] **Step 1: Write the failing tests** — one per bullet, using `admin_client`, `viewer_client` and copies of `collected_db`.
+- [ ] **Step 2: Run, see them fail, implement, run, see them pass**
+- [ ] **Step 3: Commit** — `git commit -m "fix: web and auth carry-over from plan 1"`
+
+### Task 0C: Test gaps
+
+**Files:**
+- Test only: `tests/test_settings.py`, `tests/test_db.py`, `tests/test_runner.py`, `tests/test_auth.py`, `tests/test_checkconfig.py`, `tests/test_classify.py`, `tests/conftest.py`
+
+Add these tests (no app code changes unless a test finds a bug):
+- `Site.url` trailing slash is stripped; `mask_token` on a token without `:` returns `****`.
+- `conftest` loads `.env` from the repo root by absolute path, so tests run from any directory.
+- Pragmas `foreign_keys`, `busy_timeout`, `synchronous` are set; a failing migration rolls back and leaves `user_version` unchanged.
+- `_final_status` for every combination: all ok, mixed, all failed, cancelled, stopped, site errors.
+- Cancel during a run (between clusters, not only before the first).
+- The scheduler fires: `CollectorThread` with `COLLECT_DAILY_AT` one minute ahead starts a run (live, marked `slow`).
+- `namespace_profile` has exactly one row per namespace seen on `local`.
+- `check-config` exit 1 path for a settings error.
+- Test connections are closed (use fixtures that close them).
+- `test_cancelled_task_ends_interrupted` no longer depends on a 0.5 s sleep: cancel after the run's first `run_clusters` row is `running` (poll the DB).
+
+- [ ] **Step 1: Write the tests and run them**
+- [ ] **Step 2: Fix any bug they find, in the module that owns it**
+- [ ] **Step 3: Commit** — `git commit -m "test: close plan 1 test gaps"`
 
 ---
 
@@ -254,6 +344,7 @@ If the first test finds non-Rancher, non-kagent roles, show the list to the user
   - `def complexity_flags(conn, site, cluster_id, rules) -> list[str]` — names exactly as spec 6.14: `k8s<1.32`, `stateful`, `rwx`, `nginx-snippets`, `many-crds`, `deprecated-apis`, `privileged/hostpath`, `gpu`, `operators`, `intercept-all-webhooks`. Stored in `cluster_profile.complexity_flags`.
   - `/platform`: webhooks, aggregated APIServices, custom ClusterRoles, non-system cluster-admin bindings, API versions served and in use.
   - `/inventory`: flags as badges and a `flag` filter.
+  - `system_crd_groups` in `rules.yaml`: before this task, ask the user whether `operator.tigera.io` and the Cluster API groups (`*.x-k8s.io`) count as platform. If yes, add `tigera.io` and `x-k8s.io` (subdomain matching from plan 1 covers the rest) and update the dev class expectation in the tests from live data.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -281,6 +372,12 @@ def test_platform_page(admin_client_collected):  # /platform contains "rancher.c
   - `ALLOWED_FILTERS` adds `annotation` (`key` or `key=value`), `service_type`, `address` (equals or prefix), `helm_chart` (`name` or `name@version`), `crd_group`, `class`, `flag`.
   - `def csv_response(rows: list[dict], filename: str) -> StreamingResponse` — every page table gets `?format=csv`; each download is logged with the username.
   - `/export/clusters.csv`, `/export/resources.csv?<query filters>`; `/api/clusters`, `/api/resources?<query filters>` returning JSON (session required).
+- Carry-over from plan 1 (same files):
+  - `name` and `image` filters escape `%` and `_` (`LIKE ... ESCAPE '\'`), as `/network` already does.
+  - The 5,000-row note appears only when more than 5,000 rows exist (fetch `max_rows + 1`).
+  - A public `validate_filters(filters: dict) -> None` in `queries.py` replaces the private `_where` call in `presets.py`; `/check` and `/presets` show "invalid preset" for a stored preset that fails it or has corrupt JSON, instead of a 500.
+  - `/check?preset=abc` shows the preset list with a message instead of a 422.
+  - Non-live tests of `build_query` against a copy of `collected_db`: `cluster` matches by id and by name, `image` substring, `label` key and key=value.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -416,7 +513,9 @@ def test_tls_serving(tmp_path):  # self-signed cert made with openssl in the tes
 Needs prerequisite 3.
 
 **Files:**
-- Modify: `README.md` (final airgap steps, replacing the "planning" status line)
+- Modify: `README.md` (final airgap steps, replacing the status line), `Dockerfile`
+
+- [ ] **Step 0: Pin the build to `uv.lock`** (carry-over from plan 1: `pip wheel .` resolves unpinned versions). In the build stage run `uv export --frozen --no-dev --format requirements-txt > requirements.txt` (copy the `uv` binary from `ghcr.io/astral-sh/uv` pinned by digest) and `pip wheel --require-hashes -r requirements.txt` plus `pip wheel --no-deps .`. Check: two builds a day apart install identical package versions (`pip freeze` in both images matches `uv.lock`).
 
 - [ ] **Step 1: Build for the airgap architecture**
 
