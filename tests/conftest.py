@@ -23,3 +23,19 @@ def settings(env):
 @pytest.fixture
 def dev_site(settings):
     return load_sites(settings)[0]
+
+
+@pytest.fixture
+def db_path(tmp_path):
+    return tmp_path / "inventory.db"
+
+
+@pytest.fixture
+def db(db_path):
+    from inventory.db.connection import connect
+    from inventory.db.migrate import migrate
+
+    conn = connect(db_path)
+    migrate(conn)
+    yield conn
+    conn.close()
