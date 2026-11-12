@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}{{ c.name }} - Rancher inventory{% endblock %}
+{% block content %}
+<h1>{{ c.name }} <span class="muted">({{ c.site }} / {{ c.cluster_id }})</span></h1>
+{% if user.role == "admin" %}
+<form method="post" action="/runs" class="inline">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="site" value="{{ c.site }}">
+  <input type="hidden" name="cluster_id" value="{{ c.cluster_id }}">
+  <button type="submit" {% if header.active_run %}disabled{% endif %}>Refresh this cluster</button>
+</form>
+{% endif %}
+<table class="facts">
+  <tr><th>State</th><td>{{ c.state or "-" }}</td></tr>
+  <tr><th>Provider</th><td>{{ c.provider or "-" }}</td></tr>
+  <tr><th>Kubernetes</th><td>{{ c.k8s_version or "-" }}</td></tr>
+  <tr><th>Nodes</th><td>{{ c.node_count if c.node_count is not none else "-" }}</td></tr>
+  <tr><th>CPU cores alloc / req / used</th><td>{{ c.cpu_alloc_m | cores }} / {{ c.cpu_req_m | cores }} / {{ c.cpu_used_m | cores }}</td></tr>
+  <tr><th>Memory GiB alloc / req / used</th><td>{{ c.mem_alloc_b | gib }} / {{ c.mem_req_b | gib }} / {{ c.mem_used_b | gib }}</td></tr>
+  <tr><th>Last ok</th><td>{{ c.last_ok_at | dt }}</td></tr>
+  {% if user.role == "admin" %}<tr><th>Last error</th><td class="error">{{ c.last_error or "" }}</td></tr>{% endif %}
+</table>
+
+<h2>Usage per day</h2>
+{% if metrics %}
+<div class="charts">
+  <div class="chart"><canvas id="cpu-chart"></canvas></div>
+  <div class="chart"><canvas id="mem-chart"></canvas></div>
+</div>
+<script type="application/json" id="metrics-data">{{ metrics | tojson }}</script>
+<script src="/static/chart.umd.min.js"></script>
+<script>
+(function () {
+  var rows = JSON.parse(document.getElementById("metrics-data").textContent);
+  var days = rows.map(function (r) { return r.day; });
+  function series(key, div) {
+    return rows.map(function (r) { return r[key] === null ? null : r[key] / div; });
+  }
+  function draw(id, title, keys, div) {
+    new Chart(document.getElementById(id), {
+      type: "line",
+      data: {
+        labels: days,
+        datasets: [
+          { label: "Allocatable", data: series(keys[0], div), borderColor: "#4a6fa5" },
+          { label: "Requested", data: series(keys[1], div), borderColor: "#c97b2a" },
+          { label: "Used", data: series(keys[2], div), borderColor: "#3d8b5a" }
+        ]
+      },
+      options: { animation: false, plugins: { title: { display: true, text: title } },
+                 scales: { y: { beginAtZero: true } } }
+    });
+  }
+  draw("cpu-chart", "CPU cores", ["cpu_alloc_m", "cpu_req_m", "cpu_used_m"], 1000);
+  draw("mem-chart", "Memory GiB", ["mem_alloc_b", "mem_req_b", "mem_used_b"], 1073741824);
+})();
+</script>
+{% else %}
+<p>No metrics yet.</p>
+{% endif %}
+{% endblock %}

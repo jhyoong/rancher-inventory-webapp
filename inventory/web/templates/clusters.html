@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Clusters - Rancher inventory{% endblock %}
+{% block content %}
+<h1>Clusters</h1>
+<table>
+  <tr>
+    <th>Site</th><th>Name</th><th>State</th><th>Provider</th><th>Kubernetes</th><th>Nodes</th>
+    <th>CPU cores alloc / req / used</th><th>Memory GiB alloc / req / used</th><th>Last ok</th>
+    {% if user.role == "admin" %}<th>Last error</th>{% endif %}
+  </tr>
+  {% for c in clusters %}
+  <tr>
+    <td>{{ c.site }}</td>
+    <td><a href="/clusters/{{ c.site }}/{{ c.cluster_id }}">{{ c.name }}</a></td>
+    <td>{{ c.state or "-" }}</td>
+    <td>{{ c.provider or "-" }}</td>
+    <td>{{ c.k8s_version or "-" }}</td>
+    <td class="r">{{ c.node_count if c.node_count is not none else "-" }}</td>
+    <td class="r">{{ c.cpu_alloc_m | cores }} / {{ c.cpu_req_m | cores }} / {{ c.cpu_used_m | cores }}</td>
+    <td class="r">{{ c.mem_alloc_b | gib }} / {{ c.mem_req_b | gib }} / {{ c.mem_used_b | gib }}</td>
+    <td>{{ c.last_ok_at | dt }}</td>
+    {% if user.role == "admin" %}<td class="error">{{ c.last_error or "" }}</td>{% endif %}
+  </tr>
+  {% else %}
+  <tr><td colspan="10">No clusters collected yet.</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}

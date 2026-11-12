@@ -113,3 +113,105 @@ def kinds(settings):
     from inventory.collector.kinds import load_kinds
 
     return load_kinds(settings)
+
+
+# ---- web app fixtures ----
+
+TEST_PASSWORD = "test-admin-password"
+
+
+@pytest.fixture
+def test_password():
+    return TEST_PASSWORD
+
+
+def _web_settings(data_dir: Path) -> Settings:
+    return Settings(
+        data_dir=data_dir,
+        sites_file=Path("dev/config/sites.yaml"),
+        defaults_dir=Path("config/defaults"),
+        collector_enabled=False,
+        cookie_secure=False,  # TestClient talks plain http
+        admin_user="admin",
+        admin_password=TEST_PASSWORD,
+    )
+
+
+def _login(client, settings: Settings, username: str, password: str):
+    from inventory.web.auth import csrf_token
+
+    r = client.post("/login", data={"username": username, "password": password}, follow_redirects=False)
+    assert r.status_code == 303, r.text
+    client.csrf = csrf_token(settings.session_secret, client.cookies["session"])
+    return client
+
+
+@pytest.fixture
+def web_settings(tmp_path):
+    return _web_settings(tmp_path)
+
+
+@pytest.fixture
+def web_app(web_settings):
+    from inventory.web.app import create_app
+
+    return create_app(web_settings, None)
+
+
+@pytest.fixture
+def client(web_app):
+    from fastapi.testclient import TestClient
+
+    with TestClient(web_app) as c:
+        yield c
+
+
+@pytest.fixture
+def admin_client(client, web_settings):
+    return _login(client, web_settings, "admin", TEST_PASSWORD)
+
+
+@pytest.fixture
+def viewer_client(web_app, web_settings):
+    from fastapi.testclient import TestClient
+
+    from inventory.db.connection import connect
+    from inventory.web.auth import create_user
+
+    with TestClient(web_app) as c:
+        conn = connect(web_settings.db_path)
+        try:
+            create_user(conn, "viewer", "viewer-password-1", "viewer")
+        finally:
+            conn.close()
+        yield _login(c, web_settings, "viewer", "viewer-password-1")
+
+
+@pytest.fixture(scope="session")
+def collected_db(tmp_path_factory):
+    """Settings for a session tmp DB after one real full run against dev."""
+    import asyncio
+
+    from inventory.collector.runner import Scope, create_run, execute_run
+    from inventory.db.connection import connect
+    from inventory.db.migrate import migrate
+
+    settings = _web_settings(tmp_path_factory.mktemp("collected"))
+    conn = connect(settings.db_path)
+    try:
+        migrate(conn)
+        run_id = create_run(conn, "manual", "test", Scope())
+    finally:
+        conn.close()
+    assert asyncio.run(execute_run(settings, run_id)) == "ok"
+    return settings
+
+
+@pytest.fixture
+def admin_client_collected(collected_db):
+    from fastapi.testclient import TestClient
+
+    from inventory.web.app import create_app
+
+    with TestClient(create_app(collected_db, None)) as c:
+        yield _login(c, collected_db, "admin", TEST_PASSWORD)

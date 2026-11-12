@@ -115,7 +115,7 @@ def ensure_first_admin(conn, settings) -> bool:
     with transaction(conn):
         if conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] > 0:
             return False
-        create_user(conn, "admin", settings.admin_password, "admin")
+        create_user(conn, settings.admin_user, settings.admin_password, "admin")
     return True
 
 

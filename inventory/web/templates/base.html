@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Rancher inventory{% endblock %}</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/htmx.min.js"></script>
+</head>
+<body>
+{% if user %}
+<header>
+  <nav>
+    <strong>Rancher inventory</strong>
+    <a href="/">Overview</a>
+    <a href="/clusters">Clusters</a>
+    <a href="/runs">Runs</a>
+    {% if user.role == "admin" %}<a href="/admin/users">Users</a>{% endif %}
+    <span class="spacer"></span>
+    <span class="muted">{{ user.username }} ({{ user.role }})</span>
+    <form method="post" action="/logout" class="inline">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button type="submit">Log out</button>
+    </form>
+  </nav>
+  <div class="status">
+    <span>Data as of {{ header.data_as_of | dt if header.data_as_of else "never (no completed run yet)" }}</span>
+    {% if header.stale %}
+    <span class="warn">Warning: data is older than {{ settings.stale_after_hours }} hours</span>
+    {% endif %}
+    {% include "_progress.html" %}
+  </div>
+</header>
+{% endif %}
+<main>
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>

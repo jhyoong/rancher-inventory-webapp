@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Users - Rancher inventory{% endblock %}
+{% block content %}
+<h1>Users</h1>
+{% if message %}<p class="ok">{{ message }}</p>{% endif %}
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+<table>
+  <tr><th>Username</th><th>Role</th><th>State</th><th>Actions</th></tr>
+  {% for u in users %}
+  <tr>
+    <td>{{ u.username }}</td>
+    <td>{{ u.role }}</td>
+    <td>{{ "disabled" if u.disabled else "enabled" }}</td>
+    <td>
+      <form method="post" action="/admin/users" class="inline">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="username" value="{{ u.username }}">
+        {% if u.disabled %}
+        <button name="action" value="enable">Enable</button>
+        {% elif u.username != user.username %}
+        <button name="action" value="disable">Disable</button>
+        {% endif %}
+      </form>
+      <form method="post" action="/admin/users" class="inline">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="username" value="{{ u.username }}">
+        <input type="password" name="password" placeholder="New password" minlength="12" required>
+        <button name="action" value="reset">Reset password</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+
+<h2>Add user</h2>
+<form method="post" action="/admin/users">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="action" value="add">
+  <label>Username <input name="username" required></label>
+  <label>Password <input type="password" name="password" minlength="12" required></label>
+  <label>Role
+    <select name="role"><option value="viewer">viewer</option><option value="admin">admin</option></select>
+  </label>
+  <button type="submit">Add</button>
+</form>
+{% endblock %}

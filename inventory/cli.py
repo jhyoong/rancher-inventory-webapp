@@ -101,6 +101,53 @@ def _user_command(args) -> int:
         conn.close()
 
 
+def _serve() -> int:
+    import logging
+
+    import uvicorn
+
+    from inventory.collector.thread import CollectorThread
+    from inventory.db.connection import connect
+    from inventory.db.migrate import migrate
+    from inventory.settings import Settings
+    from inventory.web.app import create_app
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    settings = Settings()
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
+    conn = connect(settings.db_path)
+    try:
+        migrate(conn)  # the collector marks unfinished runs before the app starts
+    finally:
+        conn.close()
+    collector = CollectorThread(settings)
+    collector.start()
+    tls = {}
+    if settings.tls_cert_file and settings.tls_key_file:
+        tls = {"ssl_certfile": settings.tls_cert_file, "ssl_keyfile": settings.tls_key_file}
+    try:
+        uvicorn.run(create_app(settings, collector), host="0.0.0.0", port=settings.listen_port, **tls)
+    finally:
+        collector.stop(timeout=60)
+    return 0
+
+
+def _healthcheck() -> int:
+    import httpx
+
+    from inventory.settings import Settings
+
+    settings = Settings()
+    scheme = "https" if settings.tls_cert_file and settings.tls_key_file else "http"
+    try:
+        r = httpx.get(f"{scheme}://127.0.0.1:{settings.listen_port}/healthz", verify=False, timeout=10)
+        ok = r.status_code == 200 and r.json().get("ok") is True
+    except (httpx.HTTPError, ValueError):
+        ok = False
+    print("ok" if ok else "not ok")
+    return 0 if ok else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     if args.command == "check-config":
@@ -109,6 +156,10 @@ def main(argv: list[str] | None = None) -> int:
         return _collect_once()
     if args.command == "user":
         return _user_command(args)
+    if args.command == "serve":
+        return _serve()
+    if args.command == "healthcheck":
+        return _healthcheck()
     print("not implemented yet")
     return 2
 

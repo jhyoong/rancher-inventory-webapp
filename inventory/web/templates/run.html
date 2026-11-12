@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Run {{ run.id }} - Rancher inventory{% endblock %}
+{% block content %}
+<h1>Run {{ run.id }} <span class="s-{{ run.status }}">{{ run.status }}</span></h1>
+<p class="muted">
+  {{ run.trigger }}{% if run.triggered_by %} by {{ run.triggered_by }}{% endif %},
+  started {{ run.started_at | dt }}, finished {{ run.finished_at | dt }}, duration {{ duration | secs }}
+</p>
+{% if user.role == "admin" %}
+  {% if run.error %}<p class="error">{{ run.error }}</p>{% endif %}
+  {% if run.status == "running" %}
+  <form method="post" action="/runs/{{ run.id }}/cancel" class="inline">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button type="submit" {% if run.cancel_requested %}disabled{% endif %}>
+      {% if run.cancel_requested %}Cancel requested{% else %}Cancel{% endif %}</button>
+  </form>
+  {% elif any_failed %}
+  <form method="post" action="/runs/{{ run.id }}/retry" class="inline">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button type="submit">Retry failed</button>
+  </form>
+  {% endif %}
+{% endif %}
+
+<h2>Totals per site</h2>
+<table>
+  <tr><th>Site</th><th>Clusters</th><th>Ok</th><th>Failed</th><th>Objects</th></tr>
+  {% for t in totals %}
+  <tr><td>{{ t.site }}</td><td class="r">{{ t.clusters }}</td><td class="r">{{ t.ok }}</td>
+      <td class="r">{{ t.failed }}</td><td class="r">{{ t.objects }}</td></tr>
+  {% endfor %}
+</table>
+
+<h2>Clusters</h2>
+<table>
+  <tr><th>Site</th><th>Cluster</th><th>Status</th><th>Kinds</th><th>Objects</th><th>Duration</th>
+    {% if user.role == "admin" %}<th>Error</th>{% endif %}</tr>
+  {% for r in rows %}
+  <tr>
+    <td>{{ r.site }}</td>
+    <td><a href="/clusters/{{ r.site }}/{{ r.cluster_id }}">{{ r.name or r.cluster_id }}</a></td>
+    <td class="s-{{ r.status }}">{{ r.status }}</td>
+    <td class="r">{{ r.kinds_done if r.kinds_done is not none else "-" }} / {{ r.kinds_total if r.kinds_total is not none else "-" }}</td>
+    <td class="r">{{ r.objects if r.objects is not none else "-" }}</td>
+    <td class="r">{{ r.duration | secs }}</td>
+    {% if user.role == "admin" %}<td class="error">{{ r.error or "" }}</td>{% endif %}
+  </tr>
+  {% else %}
+  <tr><td colspan="7">No clusters in this run yet.</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}

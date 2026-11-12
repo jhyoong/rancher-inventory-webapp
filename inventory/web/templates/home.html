@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Overview</h1>
+<div class="cards">
+  <div class="card"><div class="num">{{ overview.sites }}</div>Sites</div>
+  <div class="card"><div class="num">{{ overview.clusters }}</div>Clusters</div>
+  <div class="card"><div class="num">{{ overview.nodes }}</div>Nodes</div>
+</div>
+<h2>Failed clusters in the last run</h2>
+{% if overview.last_run %}
+<p class="muted">Run <a href="/runs/{{ overview.last_run.id }}">{{ overview.last_run.id }}</a>,
+  {{ overview.last_run.status }}, started {{ overview.last_run.started_at | dt }}</p>
+{% if overview.failed %}
+<table>
+  <tr><th>Site</th><th>Cluster</th>{% if user.role == "admin" %}<th>Error</th>{% endif %}</tr>
+  {% for f in overview.failed %}
+  <tr>
+    <td>{{ f.site }}</td>
+    <td><a href="/clusters/{{ f.site }}/{{ f.cluster_id }}">{{ f.name or f.cluster_id }}</a></td>
+    {% if user.role == "admin" %}<td class="error">{{ f.error or "" }}</td>{% endif %}
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p>None.</p>
+{% endif %}
+{% else %}
+<p>No run has finished yet.</p>
+{% endif %}
+{% endblock %}

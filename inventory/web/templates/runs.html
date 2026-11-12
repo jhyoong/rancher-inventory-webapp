@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Runs - Rancher inventory{% endblock %}
+{% block content %}
+<h1>Runs</h1>
+<table>
+  <tr><th>Run</th><th>Status</th><th>Trigger</th><th>By</th><th>Started</th><th>Finished</th><th>Clusters</th></tr>
+  {% for r in runs %}
+  <tr>
+    <td><a href="/runs/{{ r.id }}">{{ r.id }}</a></td>
+    <td class="s-{{ r.status }}">{{ r.status }}</td>
+    <td>{{ r.trigger }}</td>
+    <td>{{ r.triggered_by or "-" }}</td>
+    <td>{{ r.started_at | dt }}</td>
+    <td>{{ r.finished_at | dt }}</td>
+    <td class="r">{{ r.clusters_total if r.clusters_total is not none else "-" }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="7">No runs yet.</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}
