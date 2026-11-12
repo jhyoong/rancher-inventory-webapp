@@ -279,7 +279,10 @@ def _remove_unlisted(conn: sqlite3.Connection, site: str, listed: set[str]) -> N
     known = [r[0] for r in conn.execute("SELECT cluster_id FROM clusters WHERE site=?", (site,))]
     for cid in sorted(set(known) - listed):
         with transaction(conn):
-            for table in ("resources", "namespace_profile", "cluster_profile", "cluster_metrics_latest", "clusters"):
+            for table in (
+                "resources", "namespace_profile", "cluster_profile", "cluster_metrics_latest", "clusters",
+                "api_versions", "optional_results",
+            ):
                 conn.execute(f"DELETE FROM {table} WHERE site=? AND cluster_id=?", (site, cid))
         log.info("removed cluster %s/%s: Rancher no longer lists it", site, cid)
 
