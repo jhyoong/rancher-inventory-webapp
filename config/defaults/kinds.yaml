@@ -1,0 +1,6 @@
+kinds:
+  nodes:
+    path: /api/v1/nodes
+    scope: cluster
+    keep:
+      - status.nodeInfo.kubeletVersion
