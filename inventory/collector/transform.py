@@ -5,8 +5,8 @@ from dataclasses import astuple, dataclass, field
 from inventory.collector.addresses import Address, extract_addresses
 from inventory.collector.annotations import filter_annotations
 from inventory.collector.kinds import KindSpec
+from inventory.collector.podspec import derive_pod, derive_workload
 from inventory.collector.rules import Rules
-from inventory.collector.units import parse_bytes, parse_cpu
 
 
 @dataclass
@@ -65,29 +65,13 @@ def _set_path(data: dict, path: str, value) -> None:
     cur[parts[-1]] = value
 
 
-def _pod_spec(obj: dict) -> dict:
-    return ((obj.get("spec") or {}).get("template") or {}).get("spec") or {}
-
-
 def _derive_node(obj: dict, data: dict) -> None:
     prefix = "node-role.kubernetes.io/"
     labels = (obj.get("metadata") or {}).get("labels") or {}
     data["roles"] = sorted(k[len(prefix):] for k in labels if k.startswith(prefix) and k[len(prefix):])
 
 
-def _derive_workload(obj: dict, data: dict) -> None:
-    volumes = _pod_spec(obj).get("volumes") or []
-    claims = []
-    for v in volumes:
-        name = ((v or {}).get("persistentVolumeClaim") or {}).get("claimName")
-        if name:
-            claims.append(name)
-    data["pvc_claims"] = sorted(set(claims))
-    data["hostpath"] = any("hostPath" in (v or {}) for v in volumes)
-
-
 def _derive_statefulset(obj: dict, data: dict) -> None:
-    _derive_workload(obj, data)
     out = []
     for t in (obj.get("spec") or {}).get("volumeClaimTemplates") or []:
         spec = t.get("spec") or {}
@@ -106,24 +90,8 @@ def _derive_pv(obj: dict, data: dict) -> None:
     data["local"] = bool(spec.get("local") or spec.get("hostPath"))
 
 
-def _quantity(parse, value) -> int | None:
-    """Parse a quantity, or None when it cannot be read."""
-    try:
-        return parse(value)
-    except (ArithmeticError, ValueError, TypeError):
-        return None
-
-
 def _derive_pod(obj: dict, data: dict) -> None:
-    cpu = mem = 0
-    for c in (obj.get("spec") or {}).get("containers") or []:
-        req = ((c or {}).get("resources") or {}).get("requests") or {}
-        if req.get("cpu"):
-            cpu += _quantity(parse_cpu, req["cpu"]) or 0
-        if req.get("memory"):
-            mem += _quantity(parse_bytes, req["memory"]) or 0
-    data["cpu_req_m"] = cpu
-    data["mem_req_b"] = mem
+    data.update(derive_pod(obj))
 
 
 def _drop_path(data: dict, path: str) -> None:
@@ -161,8 +129,6 @@ def _derive_helmrelease(obj: dict, data: dict) -> None:
 
 _DERIVE = {
     "nodes": _derive_node,
-    "deployments": _derive_workload,
-    "daemonsets": _derive_workload,
     "statefulsets": _derive_statefulset,
     "persistentvolumes": _derive_pv,
     "pods": _derive_pod,
@@ -184,6 +150,8 @@ def trim(kind: KindSpec, obj: dict, rules: Rules | None = None) -> Trimmed:
             value = _get_path(obj, path)
             if value is not _MISSING:
                 _set_path(data, path, value)
+        if kind.podspec:
+            data.update(derive_workload(kind.name, obj))
         derive = _DERIVE.get(kind.name)
         if derive:
             derive(obj, data)

@@ -56,7 +56,10 @@ def _bytes(value) -> int | None:
         return None
 
 
-def build_profiles(conn, site: str, cluster_id: str, run_id: int, rules: Rules) -> Flags:
+def build_profiles(
+    conn, site: str, cluster_id: str, run_id: int, rules: Rules,
+    pod_usage: dict[str, tuple[int, int]] | None = None,
+) -> Flags:  # fmt: skip
     """Rebuild namespace_profile rows and the cluster_profile row from stored resources.
 
     Flags and the statefulset, PVC and Helm counts in cluster_profile come from user
@@ -184,6 +187,11 @@ def build_profiles(conn, site: str, cluster_id: str, run_id: int, rules: Rules) 
                 for n in sorted(names)
             ],
         )  # fmt: skip
+        for n, (cpu, mem) in (pod_usage or {}).items():
+            conn.execute(
+                "UPDATE namespace_profile SET cpu_used_m=?, mem_used_b=? WHERE site=? AND cluster_id=? AND namespace=?",
+                (cpu, mem, site, cluster_id, n),
+            )
         conn.execute("DELETE FROM cluster_profile " + where, args)
         conn.execute(
             "INSERT INTO cluster_profile (site, cluster_id, class, stateful, helm, custom_crds, hostpath,"

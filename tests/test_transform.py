@@ -51,7 +51,7 @@ def test_hash_stable(dev_lists, kinds):
 def test_workload_pvc_and_pod_requests(dev_lists, kinds):
     for o in dev_lists["deployments"]:
         d = trim(kinds["deployments"], o).data
-        assert isinstance(d["pvc_claims"], list) and isinstance(d["hostpath"], bool)
+        assert isinstance(d["pvc_claims"], list) and isinstance(d["hostpath"], int)
     for o in dev_lists["statefulsets"]:
         for tpl in trim(kinds["statefulsets"], o).data["volume_claim_templates"]:
             assert set(tpl) == {"name", "storage_class", "size"}
@@ -73,10 +73,12 @@ def test_no_container_commands_or_env_stored(dev_lists, kinds):
 def test_counts_match_rancher(collected_db, dev_lists, open_db):
     from inventory.db.connection import connect
 
+    from inventory.collector.podspec import skip_object
+
     conn = open_db(collected_db.db_path)
     for kind, items in dev_lists.items():
         n = conn.execute("SELECT count(*) FROM resources WHERE kind=?", [kind]).fetchone()[0]
-        assert n == len(items), kind
+        assert n == len([o for o in items if not skip_object(kind, o)]), kind
 
 
 def test_crd_and_helmrelease_non_list_dropped(dev_lists, kinds):

@@ -21,18 +21,43 @@ kinds:
     scope: namespaced
     keep: [spec.replicas, status.readyReplicas]
     annotations: true
+    podspec: true
 
   statefulsets:
     path: /apis/apps/v1/statefulsets
     scope: namespaced
     keep: [spec.replicas, status.readyReplicas]
     annotations: true
+    podspec: true
 
   daemonsets:
     path: /apis/apps/v1/daemonsets
     scope: namespaced
     keep: [status.numberReady, status.desiredNumberScheduled]
     annotations: true
+    podspec: true
+
+  jobs:
+    path: /apis/batch/v1/jobs
+    scope: namespaced
+    keep: [spec.parallelism, spec.completions, status.active, status.succeeded, status.failed]
+    annotations: true
+    podspec: true
+    # jobs owned by a CronJob are skipped
+
+  cronjobs:
+    path: /apis/batch/v1/cronjobs
+    scope: namespaced
+    keep: [status.lastScheduleTime]
+    annotations: true
+    podspec: true
+
+  replicationcontrollers:
+    path: /api/v1/replicationcontrollers
+    scope: namespaced
+    keep: [spec.replicas, status.readyReplicas]
+    annotations: true
+    podspec: true
 
   persistentvolumes:
     path: /api/v1/persistentvolumes

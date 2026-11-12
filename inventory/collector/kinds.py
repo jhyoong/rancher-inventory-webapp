@@ -15,6 +15,7 @@ class KindSpec:
     annotations: bool = False
     addresses: bool = False
     metadata_only: bool = False
+    podspec: bool = False  # derive pod spec fields (spec 6.9)
 
 
 def load_kinds(settings: Settings) -> dict[str, KindSpec]:
@@ -42,5 +43,6 @@ def load_kinds(settings: Settings) -> dict[str, KindSpec]:
             annotations=bool(item.get("annotations", False)),
             addresses=bool(item.get("addresses", False)),
             metadata_only=bool(item.get("metadata_only", False)),
+            podspec=bool(item.get("podspec", False)),
         )
     return kinds

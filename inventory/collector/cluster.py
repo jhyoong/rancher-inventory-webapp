@@ -5,9 +5,10 @@ from datetime import datetime, timezone
 
 from inventory.collector.classify import build_profiles
 from inventory.collector.kinds import KindSpec
+from inventory.collector.podspec import skip_object
 from inventory.collector.rules import Rules
 from inventory.collector.transform import trim
-from inventory.collector.units import metrics_from_cluster
+from inventory.collector.units import metrics_from_cluster, parse_bytes, parse_cpu
 from inventory.db.repo import (
     delete_stale,
     mark_cluster_failed,
@@ -23,6 +24,23 @@ from inventory.rancher.client import RancherClient, RancherError
 logger = logging.getLogger(__name__)
 
 NODE_USAGE_PATH = "/apis/metrics.k8s.io/v1beta1/nodes"
+POD_USAGE_PATH = "/apis/metrics.k8s.io/v1beta1/pods"
+
+
+def pod_usage_by_namespace(items: list[dict]) -> dict[str, tuple[int, int]]:
+    """Sum pod metrics per namespace: (cpu millicores, memory bytes). Nothing is kept per pod."""
+    out: dict[str, list[int]] = {}
+    for pod in items:
+        ns = (pod.get("metadata") or {}).get("namespace") or ""
+        total = out.setdefault(ns, [0, 0])
+        for c in pod.get("containers") or []:
+            usage = (c or {}).get("usage") or {}
+            try:
+                total[0] += parse_cpu(usage.get("cpu") or "0")
+                total[1] += parse_bytes(usage.get("memory") or "0")
+            except (ArithmeticError, ValueError, TypeError):
+                continue
+    return {ns: (cpu, mem) for ns, (cpu, mem) in out.items()}
 
 
 @dataclass
@@ -86,7 +104,7 @@ async def collect_cluster(
                 status = "failed"
                 failed_kinds.append(spec.name)
         if raw is not None:
-            items = [trim(spec, o, rules) for o in raw]
+            items = [trim(spec, o, rules) for o in raw if not skip_object(spec.name, o)]
             count = len(items)
             with transaction(conn):
                 upsert_resources(conn, site, cid, run_id, items)
@@ -112,10 +130,17 @@ async def collect_cluster(
     except Exception:
         logger.exception("metrics skipped for %s/%s", site, cid)
 
+    pod_usage = None
+    if not stopped:
+        try:
+            pod_usage = pod_usage_by_namespace(await client.list_kind(cid, POD_USAGE_PATH))
+        except RancherError as e:  # metrics-server missing or forbidden: usage stays empty
+            logger.info("pod usage skipped for %s/%s: %s", site, cid, e)
+
     error = None
     if rules is not None and not stopped and not failed_kinds:
         try:
-            build_profiles(conn, site, cid, run_id, rules)
+            build_profiles(conn, site, cid, run_id, rules, pod_usage=pod_usage)
         except Exception as e:  # collected data stays; the cluster is marked failed
             logger.exception("profile build failed for %s/%s", site, cid)
             error = f"profile build failed: {e}"
