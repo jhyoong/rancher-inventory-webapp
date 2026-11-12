@@ -4,7 +4,7 @@ A web app that keeps a daily inventory of every downstream cluster managed by on
 
 The full design is in [Rancher Inventory Tool Implementation Plan (single image, airgap).md](<Rancher Inventory Tool Implementation Plan (single image, airgap).md>).
 
-Status: plan 1 is built and runs on the dev Mac against the dev Rancher. The rest of the plan is not built yet. This README describes the setup the app expects.
+Status: plans 1 and 2 are built and tested on the dev Mac against the dev Rancher, in Docker, including a restore and an upgrade drill. The `linux/amd64` image is built for the airgap; the install on the airgap host itself is not done yet (see [Airgap install](#airgap-install)).
 
 ## Contents
 
@@ -14,8 +14,12 @@ Status: plan 1 is built and runs on the dev Mac against the dev Rancher. The res
 4. [The `.env` file](#the-env-file)
 5. [The `config/sites.yaml` file](#the-configsitesyaml-file)
 6. [Check and run](#check-and-run)
-7. [Dev cluster notes](#dev-cluster-notes)
-8. [Run on the dev Mac](#run-on-the-dev-mac)
+7. [Airgap install](#airgap-install)
+8. [Backup, restore and upgrade](#backup-restore-and-upgrade)
+9. [Discovery export](#discovery-export)
+10. [Known behaviour](#known-behaviour)
+11. [Dev cluster notes](#dev-cluster-notes)
+12. [Run on the dev Mac](#run-on-the-dev-mac)
 
 ## What you need
 
@@ -114,7 +118,7 @@ rules:
 Notes:
 
 - `configmaps` is in the list because the plan treats ConfigMap read as part of the base role. Remove it if your security team does not accept it. Only the opt-in `nginx_config_keys` collector reads ConfigMap data.
-- The plan's opt-in collectors (section 6.12) need a second RoleTemplate, `inventory-reader-extended`. Do not create it until each collector has security sign-off.
+- The opt-in collectors (spec section 6.12) need a second RoleTemplate, `inventory-reader-extended`, in [deploy/inventory-reader-extended.yaml](deploy/inventory-reader-extended.yaml). Keep only the blocks of the collectors you switch on, and do not create it until each has security sign-off. All collectors are off by default in `rules.yaml` (`optional_collectors`) and make no calls when off. A 401 or 403 from one of them is logged and skipped.
 
 ### Step 3. Bind the role on every downstream cluster
 
@@ -325,6 +329,73 @@ docker run -d --name rancher-inventory --restart unless-stopped \
 `check-config` reports for each site: URL reachable and TLS trusted, token valid and days to expiry, number of clusters visible, and which kinds return 403 on one sample cluster. Fix any 403 by adding the missing rule to the RoleTemplate.
 
 Podman takes the same commands. On SELinux hosts add `:Z` to both volume mounts.
+
+## Airgap install
+
+The image tar is built on a connected machine and carried across. Nothing is downloaded on the airgap host.
+
+### On the connected machine
+
+The build installs exactly the package versions in `uv.lock`, checked by hash. Build for the CPU architecture of the airgap VM (`linux/amd64` here; use `linux/arm64` if `uname -m` on the VM prints `aarch64`).
+
+```bash
+docker buildx build --platform linux/amd64 -t rancher-inventory:1.0.0 --load .
+mkdir -p dist
+docker save rancher-inventory:1.0.0 | gzip > dist/rancher-inventory-1.0.0.tar.gz
+(cd dist && shasum -a 256 rancher-inventory-1.0.0.tar.gz > rancher-inventory-1.0.0.tar.gz.sha256)
+```
+
+Carry across: the tar, its `.sha256` file, `config/sites.yaml`, any CA and TLS files, and `deploy/` if you use the extended role. Do not carry `.env`; write it on the airgap host.
+
+### On the airgap host
+
+```bash
+# 0. Confirm there is no route to the internet (this must fail)
+curl -m 5 https://pypi.org
+
+# 1. Verify and load the image
+sha256sum -c rancher-inventory-1.0.0.tar.gz.sha256
+docker load < rancher-inventory-1.0.0.tar.gz
+
+# 2. Folders and .env as in "Files on the host" and "The .env file"
+sudo chown 10001 /opt/rancher-inventory/data
+
+# 3. Check every site, then run (commands in "Check and run")
+```
+
+Check after the first run: `check-config` passes for every site and lists RBAC gaps; the cluster count on `/clusters` matches each Rancher dashboard; every page loads with no request to another host.
+
+## Backup, restore and upgrade
+
+Only users, presets and trend history cannot be collected again. Back them up daily, for example from cron:
+
+```bash
+docker exec rancher-inventory inventory backup /data/backup-$(date +%F).db
+```
+
+`backup` copies the database while the app runs and checks the copy (`PRAGMA integrity_check`). It refuses to overwrite a file.
+
+Restore:
+
+```bash
+docker stop rancher-inventory
+cd /opt/rancher-inventory/data
+mv inventory.db inventory.db.old && rm -f inventory.db-wal inventory.db-shm
+cp backup-YYYY-MM-DD.db inventory.db && chown 10001 inventory.db
+docker start rancher-inventory
+```
+
+Upgrade: load the new image tar, stop and remove the container, and start it again with the same two mounts. On start the app applies any missing database migrations. An older image refuses a database from a newer one with "database schema N is newer than this image".
+
+## Discovery export
+
+`/export/discovery` (admins) or `inventory export-discovery --out /data/export` builds a `tar.gz` with the same per-cluster CSV files and column names as `k8s-discovery.sh` 1.0.0, plus `fleet_summary.csv`. Names are hashed with `EXPORT_SALT`; the same salt gives the same hashes as the script. Before the file is offered, a self-check looks for IPv4 addresses, the `EXPORT_SENSITIVE_STRINGS`, and real cluster, node, namespace and workload names in the hashed columns. Any hit blocks the download and lists the file and column. The hash-to-name map is stored in the database and downloaded separately from `/export/discovery/name-map.csv`; it is never in the bundle.
+
+## Known behaviour
+
+- Data is written per cluster and kind, not per cluster. During a run, or after an interrupted one, a cluster can show new data for some kinds and the previous run's data for others. Rows are only deleted for a kind that was listed in full in the current run.
+- Kinds that are not installed on a cluster (for example `volumesnapshots`) show as "not installed", not as an error.
+- Pod usage is stored per namespace only. Jobs owned by a CronJob are not stored.
 
 ## Dev cluster notes
 
