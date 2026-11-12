@@ -16,6 +16,8 @@ def _build_parser() -> argparse.ArgumentParser:
         sp = usub.add_parser(name)
         if name != "list":
             sp.add_argument("username")
+        if name == "add":
+            sp.add_argument("--role", choices=["admin", "viewer"], required=True)
     return p
 
 
@@ -57,12 +59,52 @@ def _collect_once() -> int:
     return 0 if status in ("ok", "partial") else 1
 
 
+def _user_command(args) -> int:
+    import getpass
+
+    from inventory.db.connection import connect
+    from inventory.db.migrate import migrate
+    from inventory.settings import Settings
+    from inventory.web import auth
+
+    settings = Settings()
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
+    conn = connect(settings.db_path)
+    try:
+        migrate(conn)
+        cmd = args.user_command
+        if cmd == "list":
+            for u in auth.list_users(conn):
+                print(f"{u.username}\t{u.role}\t{'disabled' if u.disabled else 'enabled'}")
+        elif cmd == "disable":
+            auth.set_disabled(conn, args.username, True)
+            print(f"disabled {args.username}")
+        else:
+            password = getpass.getpass("Password: ")
+            if password != getpass.getpass("Repeat password: "):
+                raise ValueError("passwords do not match")
+            if cmd == "add":
+                auth.create_user(conn, args.username, password, args.role)
+                print(f"created {args.username}")
+            else:
+                auth.set_password(conn, args.username, password)
+                print(f"password changed for {args.username}")
+        return 0
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    finally:
+        conn.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     if args.command == "check-config":
         return _check_config()
     if args.command == "collect-once":
         return _collect_once()
+    if args.command == "user":
+        return _user_command(args)
     print("not implemented yet")
     return 2
 
