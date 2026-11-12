@@ -126,8 +126,19 @@ def _derive_pod(obj: dict, data: dict) -> None:
     data["mem_req_b"] = mem
 
 
+def _drop_path(data: dict, path: str) -> None:
+    *parents, last = path.split(".")
+    cur = data
+    for part in parents:
+        cur = cur.get(part)
+        if not isinstance(cur, dict):
+            return
+    cur.pop(last, None)
+
+
 def _derive_crd(obj: dict, data: dict) -> None:
     versions = (obj.get("spec") or {}).get("versions")
+    _drop_path(data, "spec.versions")
     if isinstance(versions, list):
         wanted = ("name", "served", "storage", "deprecated")
         _set_path(
@@ -139,6 +150,7 @@ def _derive_crd(obj: dict, data: dict) -> None:
 
 def _derive_helmrelease(obj: dict, data: dict) -> None:
     resources = (obj.get("spec") or {}).get("resources")
+    _drop_path(data, "spec.resources")
     if isinstance(resources, list):
         _set_path(
             data,

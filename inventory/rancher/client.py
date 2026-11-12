@@ -54,11 +54,36 @@ class RancherClient:
             raise RancherError(f"invalid JSON from {url}", resp.status_code, url) from None
 
     async def whoami(self) -> str:
+        url = f"{self._base}/v3/users"
         data = await self.get_json("/v3/users", {"me": "true"})
-        return data["data"][0]["username"]
+        try:
+            return data["data"][0]["username"]
+        except (KeyError, IndexError, TypeError):
+            raise RancherError(f"unexpected response from {url}", 200, url) from None
 
-    async def list_clusters(self) -> list[dict]:
-        return (await self.get_json("/v3/clusters"))["data"]
+    async def list_clusters(self, page_size: int | None = None) -> list[dict]:
+        """Every cluster, following pagination.next. Any page error raises."""
+        path: str | None = "/v3/clusters"
+        params: dict | None = {"limit": page_size} if page_size else None
+        clusters: list[dict] = []
+        seen: set[str] = set()
+        while path:
+            url = f"{self._base}{path}"
+            data = await self.get_json(path, params)
+            page = data.get("data") if isinstance(data, dict) else None
+            if not isinstance(page, list) or not all(isinstance(c, dict) and "id" in c for c in page):
+                raise RancherError(f"unexpected response from {url}", 200, url)
+            clusters.extend(page)
+            nxt = (data.get("pagination") or {}).get("next")
+            if not nxt:
+                break
+            if not nxt.startswith(self._base + "/"):
+                raise RancherError(f"pagination link to another host from {url}", 200, url)
+            path, params = nxt[len(self._base):], None
+            if path in seen:
+                raise RancherError(f"pagination loop at {url}", 200, url)
+            seen.add(path)
+        return clusters
 
     async def list_kind(self, cluster_id: str, path: str, page_size: int = 500) -> list[dict]:
         base, _, query = f"/k8s/clusters/{cluster_id}{path}".partition("?")
@@ -67,6 +92,7 @@ class RancherClient:
         extra = dict(parse_qsl(query, keep_blank_values=True))
         items: list[dict] = []
         token = ""
+        seen: set[str] = set()
         while True:
             params: dict = {**extra, "limit": page_size}
             if token:
@@ -83,3 +109,6 @@ class RancherClient:
             token = (data.get("metadata") or {}).get("continue") or ""
             if not token:
                 return items
+            if token in seen:
+                raise RancherError(f"continue token repeated for {self._base}{url}", 200, f"{self._base}{url}")
+            seen.add(token)

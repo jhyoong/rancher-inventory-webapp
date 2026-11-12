@@ -16,27 +16,47 @@ class Rules:
     system_crd_groups: list[str] = field(default_factory=list)
 
 
-def load_rules(settings) -> Rules:
-    """Read rules.yaml from the config dir, else from the defaults dir."""
-    path = Path(settings.config_dir) / "rules.yaml"
-    if not path.is_file():
-        path = Path(settings.defaults_dir) / "rules.yaml"
-    if not path.is_file():
-        raise ConfigError(f"rules file not found: {path}")
-    data = yaml.safe_load(path.read_text()) or {}
+def _read_yaml(path: Path) -> dict:
+    try:
+        data = yaml.safe_load(path.read_text()) or {}
+    except (yaml.YAMLError, OSError) as e:
+        raise ConfigError(f"cannot read rules file {path}: {type(e).__name__}") from None
     if not isinstance(data, dict):
         raise ConfigError(f"rules file is not a mapping: {path}")
+    return data
+
+
+def load_rules(settings) -> Rules:
+    """Read rules.yaml from the config dir, else from the defaults dir.
+
+    A key missing from an override file falls back to the built-in default.
+    """
+    default_path = Path(settings.defaults_dir) / "rules.yaml"
+    path = Path(settings.config_dir) / "rules.yaml"
+    if not path.is_file():
+        path = default_path
+    if not path.is_file():
+        raise ConfigError(f"rules file not found: {path}")
+    data = _read_yaml(path)
+    if path != default_path and default_path.is_file():
+        defaults = _read_yaml(default_path)
+        ann = {**(defaults.get("annotations") or {}), **(data.get("annotations") or {})}
+        data = {**defaults, **data, "annotations": ann}
     ann = data.get("annotations") or {}
+    if not isinstance(ann, dict):
+        raise ConfigError(f"annotations must be a mapping in {path}")
     try:
         max_chars = int(ann.get("max_value_chars", 256))
     except (TypeError, ValueError):
         raise ConfigError(f"max_value_chars must be a number in {path}") from None
+    if max_chars < 1:
+        raise ConfigError(f"max_value_chars must be at least 1 in {path}")
 
     def strings(value, name: str) -> list[str]:
         if value is None:
             return []
-        if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
-            raise ConfigError(f"{name} must be a list of strings in {path}")
+        if not isinstance(value, list) or not all(isinstance(v, str) and v.strip() for v in value):
+            raise ConfigError(f"{name} must be a list of non-empty strings in {path}")
         return list(value)
 
     return Rules(

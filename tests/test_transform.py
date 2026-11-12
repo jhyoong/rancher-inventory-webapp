@@ -77,3 +77,15 @@ def test_counts_match_rancher(collected_db, dev_lists):
     for kind, items in dev_lists.items():
         n = conn.execute("SELECT count(*) FROM resources WHERE kind=?", [kind]).fetchone()[0]
         assert n == len(items), kind
+
+
+def test_crd_and_helmrelease_non_list_dropped(dev_lists, kinds):
+    """Real objects with the list field replaced by a string store nothing for it."""
+    import copy
+
+    crd = copy.deepcopy(dev_lists["customresourcedefinitions"][0])
+    crd["spec"]["versions"] = "v1"
+    assert "versions" not in trim(kinds["customresourcedefinitions"], crd).data.get("spec", {})
+    app = copy.deepcopy(dev_lists["helmreleases"][0])
+    app["spec"]["resources"] = "x"
+    assert "resources" not in trim(kinds["helmreleases"], app).data.get("spec", {})

@@ -301,3 +301,63 @@ def test_schedule_survives_errors(settings, monkeypatch):
 
     asyncio.run(go())
     assert len(calls) == 3
+
+
+@pytest.mark.live
+def test_removal_skipped_when_listing_fails(collected_db, tmp_path, monkeypatch):
+    """A site whose cluster list cannot be read keeps its stored clusters after a full run."""
+    import shutil
+
+    shutil.copy(collected_db.db_path, tmp_path / "inventory.db")
+    s = collected_db.model_copy(update={"data_dir": tmp_path})
+    monkeypatch.setenv("RANCHER_DEV_TOKEN", "token-bad00:x")
+    conn = connect(s.db_path)
+    before = conn.execute("SELECT count(*) FROM resources WHERE cluster_id='local'").fetchone()[0]
+    rid = create_run(conn, "manual", "t", Scope())
+    assert asyncio.run(execute_run(s, rid)) == "failed"
+    assert conn.execute("SELECT count(*) FROM clusters WHERE cluster_id='local'").fetchone()[0] == 1
+    assert conn.execute("SELECT count(*) FROM resources WHERE cluster_id='local'").fetchone()[0] == before
+
+
+def test_request_run_without_loop_leaves_no_running_row(settings, db):
+    from inventory.collector.thread import CollectorThread
+
+    t = CollectorThread(settings)  # never started: its loop is not running
+    with pytest.raises(RuntimeError):
+        t.request_run("manual", "a", Scope())
+    assert db.execute("SELECT count(*) FROM runs WHERE status='running'").fetchone()[0] == 0
+
+
+def test_scheduled_start_retried_until_it_succeeds(settings, monkeypatch):
+    """A scheduled start that raises is retried; today's run is not skipped."""
+    from datetime import timedelta
+
+    from inventory.collector import thread as thread_mod
+    from inventory.collector.thread import CollectorThread
+
+    t = CollectorThread(settings)
+    monkeypatch.setattr(t, "_is_stale", lambda: False)
+    monkeypatch.setattr(thread_mod, "RETRY_SLEEP_S", 0.01)
+    targets = []
+
+    def soon(now, at):  # first target is now; later ones are tomorrow
+        targets.append(now)
+        return now if len(targets) == 1 else now + timedelta(days=1)
+
+    monkeypatch.setattr(thread_mod, "next_start", soon)
+    calls = []
+
+    def flaky(trigger, by, scope):
+        calls.append(trigger)
+        if len(calls) < 3:
+            raise OSError("database is locked")
+        t._stop_flag.set()
+        return 1
+
+    monkeypatch.setattr(t, "request_run", flaky)
+
+    async def go():
+        await asyncio.wait_for(t._schedule(), timeout=5)
+
+    asyncio.run(go())
+    assert calls == ["schedule"] * 3

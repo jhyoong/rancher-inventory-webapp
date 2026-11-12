@@ -72,3 +72,36 @@ def test_list_kind_without_items_is_an_error(live_loop, live_client):
     """A 200 JSON body with no items list must not look like an empty kind."""
     with pytest.raises(RancherError, match="no items list"):
         live_loop.run_until_complete(live_client.list_kind("local", "/version"))
+
+
+def test_list_clusters_reads_all_pages(dev_site, settings):
+    async def go(c):
+        return await c.list_clusters(page_size=1), await c.list_clusters()
+
+    small, big = _run(dev_site, settings, go)
+    assert sorted(c["id"] for c in small) == sorted(c["id"] for c in big)
+
+
+def test_bad_continue_token_is_error(live_loop, live_client):
+    with pytest.raises(RancherError) as exc:
+        live_loop.run_until_complete(
+            live_client.get_json("/k8s/clusters/local/api/v1/pods", params={"limit": 1, "continue": "bogus"})
+        )
+    assert 400 <= exc.value.status < 500
+
+
+def test_unexpected_body_is_rancher_error(dev_site, settings, monkeypatch):
+    """whoami and list_clusters get a real body of the wrong shape (the /v3 root)."""
+
+    async def go(c):
+        real = c.get_json
+        monkeypatch.setattr(c, "get_json", lambda path, params=None: real("/v3/settings/server-version"))
+        errors = []
+        for fn in (c.whoami, c.list_clusters):
+            try:
+                await fn()
+            except RancherError as e:
+                errors.append(e)
+        return errors
+
+    assert len(_run(dev_site, settings, go)) == 2

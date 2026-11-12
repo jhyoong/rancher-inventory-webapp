@@ -18,7 +18,12 @@ def transaction(conn: sqlite3.Connection):
     except BaseException:
         conn.execute("ROLLBACK")
         raise
-    conn.execute("COMMIT")
+    try:
+        conn.execute("COMMIT")
+    except BaseException:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        raise
 
 
 def upsert_cluster(conn: sqlite3.Connection, site: str, cluster: dict, run_id: int) -> None:

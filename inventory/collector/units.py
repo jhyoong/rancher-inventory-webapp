@@ -2,7 +2,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal
 
-_CPU = {"n": Decimal("0.000001"), "u": Decimal("0.001"), "m": Decimal(1)}
+_CPU = {
+    "n": Decimal("0.000001"), "u": Decimal("0.001"), "m": Decimal(1),
+    "k": Decimal(10**6), "M": Decimal(10**9), "G": Decimal(10**12),
+}  # fmt: skip
 _BYTES = {
     "Ki": 2**10, "Mi": 2**20, "Gi": 2**30, "Ti": 2**40, "Pi": 2**50, "Ei": 2**60,
     "k": 10**3, "K": 10**3, "M": 10**6, "G": 10**9, "T": 10**12, "P": 10**15, "E": 10**18,

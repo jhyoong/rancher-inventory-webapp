@@ -32,3 +32,9 @@ def test_metrics_from_cluster_missing_fields(local_cluster):
     assert m.cpu_used_m is None and m.mem_used_b is None
     full = metrics_from_cluster(local_cluster, None)
     assert full.nodes == 3 and full.cpu_alloc_m > 0
+
+
+def test_parse_cpu_k_suffix():
+    assert parse_cpu("1k") == 1_000_000
+    assert parse_cpu("2M") == 2_000_000_000
+    assert parse_cpu("1G") == 1_000_000_000_000

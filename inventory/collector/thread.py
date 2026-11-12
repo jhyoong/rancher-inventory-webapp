@@ -56,6 +56,8 @@ class CollectorThread(threading.Thread):
         with self._lock:
             if self._stop_flag.is_set():
                 raise RuntimeError("collector is stopped")
+            if not self.is_alive() or self._loop.is_closed():
+                raise RuntimeError("collector loop is not running")
             conn = connect(self.settings.db_path)
             try:
                 run_id = create_run(conn, trigger, triggered_by, scope)
@@ -105,6 +107,7 @@ class CollectorThread(threading.Thread):
         await asyncio.gather(*list(self._tasks), return_exceptions=True)
 
     def _start_scheduled(self, triggered_by: str | None) -> None:
+        """Start a full run. Other errors than "in progress" or "stopped" propagate."""
         try:
             run_id = self.request_run("schedule", triggered_by, Scope())
             log.info("started scheduled run %s", run_id)
@@ -112,6 +115,19 @@ class CollectorThread(threading.Thread):
             log.info("run %s is active, skipping scheduled start", e.run_id)
         except RuntimeError:
             pass
+
+    async def _start_with_retry(self, triggered_by: str | None, give_up_at: datetime) -> None:
+        """Retry a failed start every RETRY_SLEEP_S until it works or give_up_at passes."""
+        while not self._stop_flag.is_set():
+            try:
+                self._start_scheduled(triggered_by)
+                return
+            except Exception:
+                if datetime.now() >= give_up_at:
+                    log.exception("scheduled start failed, giving up until the next start")
+                    return
+                log.exception("scheduled start failed, retrying in %s s", RETRY_SLEEP_S)
+                await asyncio.sleep(RETRY_SLEEP_S)
 
     def _is_stale(self) -> bool:
         conn = connect(self.settings.db_path)
@@ -136,7 +152,7 @@ class CollectorThread(threading.Thread):
                 # Sleep in short steps so clock changes do not delay the start much.
                 while (remaining := (target - datetime.now()).total_seconds()) > 0:
                     await asyncio.sleep(min(remaining, 60))
-                self._start_scheduled(None)
+                await self._start_with_retry(None, target + timedelta(days=1))
             except Exception:
                 log.exception("schedule loop error, retrying in %s s", RETRY_SLEEP_S)
                 await asyncio.sleep(RETRY_SLEEP_S)

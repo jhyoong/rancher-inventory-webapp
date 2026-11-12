@@ -36,7 +36,7 @@ def test_load_rules_override(monkeypatch, tmp_path):
     (cfg / "rules.yaml").write_text("annotations:\n  max_value_chars: 10\n  drop: [a.io]\n")
     monkeypatch.setenv("SITES_FILE", str(cfg / "sites.yaml"))
     r = load_rules(Settings())
-    assert r.max_value_chars == 10 and r.drop == ["a.io"] and r.system_namespaces == []
+    assert r.max_value_chars == 10 and r.drop == ["a.io"] and "kube-*" in r.system_namespaces
 
 
 def test_filter_annotations_rules(rules):
@@ -72,3 +72,39 @@ def test_pod_unparseable_quantity_does_not_raise(settings):
     d = trim(load_kinds(settings)["pods"], pod).data
     # "bogus" cpu is skipped; the milli memory value parses to 128974848 bytes
     assert d["cpu_req_m"] == 1000100 and d["mem_req_b"] == 128974848 + 1000 + 64 * 2**20
+
+
+def _rules_from(monkeypatch, tmp_path, text):
+    from inventory.settings import Settings
+
+    cfg = tmp_path / "cfg"
+    cfg.mkdir(exist_ok=True)
+    (cfg / "rules.yaml").write_text(text)
+    monkeypatch.setenv("SITES_FILE", str(cfg / "sites.yaml"))
+    return load_rules(Settings())
+
+
+def test_override_rules_fall_back_per_key(monkeypatch, tmp_path):
+    r = _rules_from(monkeypatch, tmp_path, "annotations:\n  max_value_chars: 10\n")
+    assert r.max_value_chars == 10
+    assert "kubectl.kubernetes.io/last-applied-configuration" in r.drop
+    assert "kube-*" in r.system_namespaces
+
+
+def test_bad_yaml_is_config_error(monkeypatch, tmp_path):
+    from inventory.settings import ConfigError
+
+    with pytest.raises(ConfigError, match="rules.yaml"):
+        _rules_from(monkeypatch, tmp_path, "annotations: [unclosed\n")
+
+
+@pytest.mark.parametrize("text", [
+    "annotations:\n  max_value_chars: 0\n",
+    "annotations:\n  drop: ['']\n",
+    "system_namespaces: ['', kube-*]\n",
+])
+def test_bad_rule_values_rejected(monkeypatch, tmp_path, text):
+    from inventory.settings import ConfigError
+
+    with pytest.raises(ConfigError):
+        _rules_from(monkeypatch, tmp_path, text)

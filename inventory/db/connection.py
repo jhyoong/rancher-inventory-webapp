@@ -11,12 +11,15 @@ class QueryTimeout(Exception):
 def connect(path: Path, readonly: bool = False) -> sqlite3.Connection:
     path = Path(path)
     if readonly:
-        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, check_same_thread=False)
+        uri = path.resolve().as_uri() + "?mode=ro"
+        conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
     else:
         conn = sqlite3.connect(path, check_same_thread=False)
     conn.isolation_level = None  # explicit transactions only
     conn.row_factory = sqlite3.Row
-    if not readonly:
+    if readonly:
+        conn.execute("PRAGMA query_only=ON")
+    else:
         conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA busy_timeout=5000")
@@ -31,6 +34,8 @@ def run_readonly_query(
     timeout_s: float = 10.0,
     max_rows: int = 5000,
 ) -> list[sqlite3.Row]:
+    if not conn.execute("PRAGMA query_only").fetchone()[0]:
+        raise ValueError("run_readonly_query needs a read-only connection")
     deadline = time.monotonic() + timeout_s
     timed_out = False
 
