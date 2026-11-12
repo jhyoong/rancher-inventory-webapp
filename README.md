@@ -351,6 +351,8 @@ sites:
 
 Build the image and run it against the dev Rancher. This needs `.env` and `dev/config/sites.yaml` in the repo.
 
+Run these commands from the repo root.
+
 ```bash
 docker build -t rancher-inventory:1.0.0-dev .
 
