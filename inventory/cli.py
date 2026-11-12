@@ -10,6 +10,8 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser("check-config")
     sub.add_parser("collect-once")
     sub.add_parser("healthcheck")
+    bk = sub.add_parser("backup", help="consistent copy of the database while the app runs")
+    bk.add_argument("file", help="destination file; must not exist")
     exp = sub.add_parser("export-discovery", help="anonymised discovery export (tar.gz)")
     exp.add_argument("--out", required=True, help="folder for the tar.gz")
     exp.add_argument("--site", help="only this site")
@@ -178,6 +180,39 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
 
+def backup(db_path, dest) -> None:
+    """Copy the database with SQLite's online backup, then check the copy's integrity."""
+    import sqlite3
+    from pathlib import Path
+
+    dest = Path(dest)
+    if dest.exists():
+        raise FileExistsError(f"{dest} already exists")
+    src = sqlite3.connect(f"{Path(db_path).resolve().as_uri()}?mode=ro", uri=True)
+    out = sqlite3.connect(dest)
+    try:
+        src.backup(out)
+        result = out.execute("PRAGMA integrity_check").fetchone()[0]
+    finally:
+        out.close()
+        src.close()
+    if result != "ok":
+        raise RuntimeError(f"integrity check of {dest} failed: {result}")
+
+
+def _backup(args) -> int:
+    from inventory.settings import Settings
+
+    settings = Settings()
+    try:
+        backup(settings.db_path, args.file)
+    except (FileExistsError, RuntimeError, OSError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    print(f"backup written to {args.file}, integrity ok")
+    return 0
+
+
 def _export_discovery(args) -> int:
     from pathlib import Path
 
@@ -232,6 +267,8 @@ def _dispatch(args: argparse.Namespace) -> int:
         return _serve()
     if args.command == "healthcheck":
         return _healthcheck()
+    if args.command == "backup":
+        return _backup(args)
     if args.command == "export-discovery":
         return _export_discovery(args)
     print("not implemented yet")

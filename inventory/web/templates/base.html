@@ -40,6 +40,7 @@
     {% if header.stale %}
     <span class="warn">Warning: data is older than {{ settings.stale_after_hours }} hours</span>
     {% endif %}
+    {% if user.role == "admin" %}{% for w in header.token_warnings %}<span class="warn">{{ w }}</span>{% endfor %}{% endif %}
     {% include "_progress.html" %}
   </div>
 </header>

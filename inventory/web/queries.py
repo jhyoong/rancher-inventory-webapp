@@ -40,9 +40,36 @@ def active_run(conn: sqlite3.Connection) -> dict | None:
     return {"id": row["id"], "done": counts[0] or 0, "total": row["clusters_total"], "failed": counts[1] or 0}
 
 
+TOKEN_WARN_DAYS = 30
+
+
+def token_warnings(settings: Settings) -> list[str]:
+    """One line per site whose token expires within TOKEN_WARN_DAYS days (or has expired)."""
+    from inventory.settings import ConfigError, load_sites
+
+    try:
+        sites = load_sites(settings)
+    except (ConfigError, OSError, ValueError):
+        return []
+    today = datetime.now(timezone.utc).date()
+    out = []
+    for s in sites:
+        if s.token_expires is None:
+            continue
+        days = (s.token_expires - today).days
+        if days < 0:
+            out.append(f"Token for {s.name} expired {-days} days ago")
+        elif days <= TOKEN_WARN_DAYS:
+            out.append(f"Token for {s.name} expires in {days} days")
+    return out
+
+
 def header_context(conn: sqlite3.Connection, settings: Settings) -> dict:
     as_of = data_as_of(conn)
-    return {"data_as_of": as_of, "stale": is_stale(as_of, settings), "active_run": active_run(conn)}
+    return {
+        "data_as_of": as_of, "stale": is_stale(as_of, settings), "active_run": active_run(conn),
+        "token_warnings": token_warnings(settings),
+    }  # fmt: skip
 
 
 _CLUSTER_SQL = """
