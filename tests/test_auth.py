@@ -175,7 +175,7 @@ def test_verify_password_malformed_is_false(stored):
     assert verify_password("some-password-123", stored) is False
 
 
-def test_concurrent_wrong_logins_stop_at_lock(db_path, db):
+def test_concurrent_wrong_logins_stop_at_lock(db_path, db, open_db):
     """Failures are counted and inserted atomically, so parallel tries cannot pass the lock."""
     from concurrent.futures import ThreadPoolExecutor
 
@@ -184,7 +184,7 @@ def test_concurrent_wrong_logins_stop_at_lock(db_path, db):
     create_user(db, "a", "right-password-1", "admin")
 
     def attempt(_):
-        conn = connect(db_path)
+        conn = open_db(db_path)
         try:
             return login(conn, "a", "wrong-password-1", 12, NOW)
         except LoginLocked:

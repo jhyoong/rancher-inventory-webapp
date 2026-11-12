@@ -120,9 +120,9 @@ def _expected(dev_lists, rules):
 
 
 @pytest.mark.live
-def test_local_profile(collected_db, rules, dev_lists):
+def test_local_profile(collected_db, rules, dev_lists, open_db):
     flags, users, groups, all_ns = _expected(dev_lists, rules)
-    conn = connect(collected_db.db_path)
+    conn = open_db(collected_db.db_path)
     try:
         def snapshot():
             cp = dict(conn.execute("SELECT * FROM cluster_profile WHERE cluster_id='local'").fetchone())
@@ -145,7 +145,8 @@ def test_local_profile(collected_db, rules, dev_lists):
         assert cp["network"] is None and cp["updated_run"] == 1
 
         by_ns = {r["namespace"]: r for r in nps}
-        assert {r["namespace"] for r in nps} >= {m["metadata"]["name"] for m in dev_lists["namespaces"]}
+        names = [r["namespace"] for r in nps]
+        assert sorted(names) == sorted(m["metadata"]["name"] for m in dev_lists["namespaces"])
         for n, exp in users.items():
             assert by_ns[n]["is_system"] == 0
             for key, value in exp.items():

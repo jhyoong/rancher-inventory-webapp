@@ -56,3 +56,30 @@ def test_cli_reports_bad_daily_at_plainly(monkeypatch, capsys):
     assert main(["check-config"]) == 1
     err = capsys.readouterr().err
     assert err.startswith("config error: COLLECT_DAILY_AT: must be HH:MM") and "Traceback" not in err
+
+
+def test_site_url_trailing_slash_stripped(tmp_path, monkeypatch, settings):
+    f = tmp_path / "sites.yaml"
+    f.write_text("sites:\n  - {name: a, url: 'https://a.example//', token_env: RANCHER_A_TOKEN}\n")
+    monkeypatch.setenv("SITES_FILE", str(f))
+    assert load_sites(type(settings)())[0].url == "https://a.example"
+
+
+def test_mask_token_without_colon():
+    assert mask_token("plainsecret") == "****"
+
+
+def test_tests_run_from_another_directory(tmp_path):
+    """conftest finds .env and the dev config by absolute path."""
+    import subprocess
+    import sys
+
+    from tests.conftest import ROOT
+
+    r = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+         str(ROOT / "tests/test_settings.py::test_dev_site_loads"),
+         str(ROOT / "tests/test_settings.py::test_site_token_missing")],
+        cwd=tmp_path, capture_output=True, text=True,
+    )  # fmt: skip
+    assert r.returncode == 0, r.stdout + r.stderr

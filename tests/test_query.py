@@ -39,7 +39,7 @@ def test_pages_need_login(client):
         assert client.get(path, follow_redirects=False).status_code == 303
 
 
-def test_preset_permissions(web_app, web_settings, viewer_client):
+def test_preset_permissions(web_app, web_settings, viewer_client, open_db):
     r = viewer_client.post(
         "/presets",
         data={"name": "p1", "filters": json.dumps({"kind": "pods"}), "csrf": viewer_client.csrf},
@@ -50,7 +50,7 @@ def test_preset_permissions(web_app, web_settings, viewer_client):
     assert viewer_client.post("/presets", data={"name": "p2", "filters": '{"data":"x"}', "csrf": viewer_client.csrf}).status_code == 400
     assert viewer_client.post("/presets", data={"name": "p3", "filters": '{"kind":"pods"}'}).status_code == 403
     assert "p1" in viewer_client.get("/presets").text
-    conn = connect(web_settings.db_path)
+    conn = open_db(web_settings.db_path)
     pid = conn.execute("SELECT id FROM presets WHERE name='p1'").fetchone()["id"]
     # a second viewer cannot delete it
     from inventory.web.auth import create_user
@@ -68,8 +68,8 @@ def test_preset_permissions(web_app, web_settings, viewer_client):
 
 
 @pytest.mark.live
-def test_query_finds_coredns(collected_db):
-    conn = connect(collected_db.db_path, readonly=True)
+def test_query_finds_coredns(collected_db, open_db):
+    conn = open_db(collected_db.db_path, readonly=True)
     try:
         sql, p = build_query({"kind": "deployments", "name": "coredns"})
         assert any(r["cluster_id"] == "local" for r in run_readonly_query(conn, sql, p))

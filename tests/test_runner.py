@@ -65,48 +65,48 @@ def test_next_daily_start():
 
 
 @pytest.mark.live
-def test_full_run_dev(settings, db, db_path):
-    rid = create_run(connect(db_path), "manual", "t", Scope())
+def test_full_run_dev(settings, db, db_path, open_db):
+    rid = create_run(open_db(db_path), "manual", "t", Scope())
     assert asyncio.run(execute_run(settings, rid)) == "ok"
-    row = connect(db_path).execute("SELECT * FROM run_clusters WHERE run_id=?", [rid]).fetchone()
+    row = open_db(db_path).execute("SELECT * FROM run_clusters WHERE run_id=?", [rid]).fetchone()
     assert row["cluster_id"] == "local" and row["status"] == "ok"
     assert row["kinds_done"] == row["kinds_total"]
-    run = connect(db_path).execute("SELECT * FROM runs WHERE id=?", [rid]).fetchone()
+    run = open_db(db_path).execute("SELECT * FROM runs WHERE id=?", [rid]).fetchone()
     assert run["status"] == "ok" and run["clusters_total"] == 1 and run["finished_at"]
 
 
 @pytest.mark.live
-def test_cancel_before_start(settings, db, db_path):
-    rid = create_run(connect(db_path), "manual", "t", Scope())
-    request_cancel(connect(db_path), rid)
+def test_cancel_before_start(settings, db, db_path, open_db):
+    rid = create_run(open_db(db_path), "manual", "t", Scope())
+    request_cancel(open_db(db_path), rid)
     assert asyncio.run(execute_run(settings, rid)) == "cancelled"
-    row = connect(db_path).execute("SELECT status FROM run_clusters WHERE run_id=?", [rid]).fetchone()
+    row = open_db(db_path).execute("SELECT status FROM run_clusters WHERE run_id=?", [rid]).fetchone()
     assert row["status"] == "skipped"
 
 
 @pytest.mark.live
-def test_bad_token_site_fails(settings, db, db_path, monkeypatch):
+def test_bad_token_site_fails(settings, db, db_path, monkeypatch, open_db):
     monkeypatch.setenv("RANCHER_DEV_TOKEN", "token-bad00:x")
-    rid = create_run(connect(db_path), "manual", "t", Scope())
+    rid = create_run(open_db(db_path), "manual", "t", Scope())
     assert asyncio.run(execute_run(settings, rid)) == "failed"
-    run = connect(db_path).execute("SELECT * FROM runs WHERE id=?", [rid]).fetchone()
+    run = open_db(db_path).execute("SELECT * FROM runs WHERE id=?", [rid]).fetchone()
     assert "401" in run["error"]
     assert "token-bad00" not in run["error"]
 
 
 @pytest.mark.live
-def test_unexpected_cluster_error_is_contained(settings, db, db_path, monkeypatch):
+def test_unexpected_cluster_error_is_contained(settings, db, db_path, monkeypatch, open_db):
     """A non-RancherError from collect_cluster fails that cluster, not the run loop."""
 
     async def broken(*args, **kwargs):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(runner, "collect_cluster", broken)
-    rid = create_run(connect(db_path), "manual", "t", Scope(site="dev", cluster_id="local"))
+    rid = create_run(open_db(db_path), "manual", "t", Scope(site="dev", cluster_id="local"))
     assert asyncio.run(execute_run(settings, rid)) == "failed"
-    row = connect(db_path).execute("SELECT * FROM run_clusters WHERE run_id=?", [rid]).fetchone()
+    row = open_db(db_path).execute("SELECT * FROM run_clusters WHERE run_id=?", [rid]).fetchone()
     assert row["status"] == "failed" and "boom" in row["error"] and row["finished_at"]
-    err = connect(db_path).execute("SELECT last_error FROM clusters WHERE cluster_id='local'").fetchone()
+    err = open_db(db_path).execute("SELECT last_error FROM clusters WHERE cluster_id='local'").fetchone()
     assert err is None or "boom" in err[0]
 
 
@@ -158,24 +158,24 @@ def test_finish_prunes_old_run_rows(db):
 
 
 @pytest.mark.live
-def test_cancelled_task_ends_interrupted(settings, db, db_path):
-    rid = create_run(connect(db_path), "manual", "t", Scope())
+def test_cancelled_task_ends_interrupted(settings, db, db_path, open_db):
+    rid = create_run(open_db(db_path), "manual", "t", Scope())
 
     async def go():
         task = asyncio.create_task(execute_run(settings, rid))
-        await asyncio.sleep(0.5)  # inside the cluster listing (first connection takes ~5 s here)
+        await _wait_for_running_cluster(open_db(db_path), rid)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
 
     asyncio.run(go())
-    run = connect(db_path).execute("SELECT status, finished_at FROM runs WHERE id=?", [rid]).fetchone()
+    run = open_db(db_path).execute("SELECT status, finished_at FROM runs WHERE id=?", [rid]).fetchone()
     assert run["status"] == "interrupted" and run["finished_at"]
-    assert create_run(connect(db_path), "manual", "t", Scope()) > rid
+    assert create_run(open_db(db_path), "manual", "t", Scope()) > rid
 
 
 @pytest.mark.live
-def test_bad_ca_file_site_does_not_stop_other_sites(settings, db, db_path, tmp_path, monkeypatch):
+def test_bad_ca_file_site_does_not_stop_other_sites(settings, db, db_path, tmp_path, monkeypatch, open_db):
     """A site whose CA file is missing is a site error; the other sites still collect."""
     import os
 
@@ -188,9 +188,9 @@ def test_bad_ca_file_site_does_not_stop_other_sites(settings, db, db_path, tmp_p
         f"    ca_file: {tmp_path / 'missing-ca.pem'}\n"
     )
     s = settings.model_copy(update={"sites_file": sites, "defaults_dir": settings.defaults_dir.resolve()})
-    rid = create_run(connect(db_path), "manual", "t", Scope())
+    rid = create_run(open_db(db_path), "manual", "t", Scope())
     assert asyncio.run(execute_run(s, rid)) == "partial"
-    conn = connect(db_path)
+    conn = open_db(db_path)
     row = conn.execute("SELECT * FROM run_clusters WHERE run_id=? AND site='dev'", [rid]).fetchone()
     assert row["cluster_id"] == "local" and row["status"] == "ok"
     run = conn.execute("SELECT * FROM runs WHERE id=?", [rid]).fetchone()
@@ -198,7 +198,7 @@ def test_bad_ca_file_site_does_not_stop_other_sites(settings, db, db_path, tmp_p
 
 
 @pytest.mark.live
-def test_full_run_removes_clusters_gone_from_rancher(collected_db, tmp_path):
+def test_full_run_removes_clusters_gone_from_rancher(collected_db, tmp_path, open_db):
     """Rows of a cluster that Rancher no longer lists are removed by a full run.
 
     The removed cluster is simulated by copying the real collected rows of `local`
@@ -208,7 +208,7 @@ def test_full_run_removes_clusters_gone_from_rancher(collected_db, tmp_path):
 
     shutil.copy(collected_db.db_path, tmp_path / "inventory.db")
     s = collected_db.model_copy(update={"data_dir": tmp_path})
-    conn = connect(s.db_path)
+    conn = open_db(s.db_path)
     conn.execute("BEGIN")
     conn.execute(
         "INSERT INTO clusters SELECT site, 'c-gone', name, state, provider, k8s_version, labels, node_count, "
@@ -249,12 +249,12 @@ def test_full_run_removes_clusters_gone_from_rancher(collected_db, tmp_path):
 
 
 @pytest.mark.live
-def test_scoped_run_keeps_unlisted_clusters(collected_db, tmp_path):
+def test_scoped_run_keeps_unlisted_clusters(collected_db, tmp_path, open_db):
     import shutil
 
     shutil.copy(collected_db.db_path, tmp_path / "inventory.db")
     s = collected_db.model_copy(update={"data_dir": tmp_path})
-    conn = connect(s.db_path)
+    conn = open_db(s.db_path)
     conn.execute(
         "INSERT INTO clusters SELECT site, 'c-gone', name, state, provider, k8s_version, labels, node_count, "
         "last_ok_run, last_ok_at, last_error, last_seen_run FROM clusters WHERE cluster_id='local'"
@@ -265,16 +265,16 @@ def test_scoped_run_keeps_unlisted_clusters(collected_db, tmp_path):
 
 
 @pytest.mark.live
-def test_metrics_error_does_not_fail_cluster(settings, db, db_path, monkeypatch):
+def test_metrics_error_does_not_fail_cluster(settings, db, db_path, monkeypatch, open_db):
     from inventory.collector import cluster as cluster_mod
 
     def broken(*args, **kwargs):
         raise ValueError("bad quantity")
 
     monkeypatch.setattr(cluster_mod, "metrics_from_cluster", broken)
-    rid = create_run(connect(db_path), "manual", "t", Scope())
+    rid = create_run(open_db(db_path), "manual", "t", Scope())
     assert asyncio.run(execute_run(settings, rid)) == "ok"
-    row = connect(db_path).execute("SELECT status FROM run_clusters WHERE run_id=?", [rid]).fetchone()
+    row = open_db(db_path).execute("SELECT status FROM run_clusters WHERE run_id=?", [rid]).fetchone()
     assert row["status"] == "ok"
 
 
@@ -304,14 +304,14 @@ def test_schedule_survives_errors(settings, monkeypatch):
 
 
 @pytest.mark.live
-def test_removal_skipped_when_listing_fails(collected_db, tmp_path, monkeypatch):
+def test_removal_skipped_when_listing_fails(collected_db, tmp_path, monkeypatch, open_db):
     """A site whose cluster list cannot be read keeps its stored clusters after a full run."""
     import shutil
 
     shutil.copy(collected_db.db_path, tmp_path / "inventory.db")
     s = collected_db.model_copy(update={"data_dir": tmp_path})
     monkeypatch.setenv("RANCHER_DEV_TOKEN", "token-bad00:x")
-    conn = connect(s.db_path)
+    conn = open_db(s.db_path)
     before = conn.execute("SELECT count(*) FROM resources WHERE cluster_id='local'").fetchone()[0]
     rid = create_run(conn, "manual", "t", Scope())
     assert asyncio.run(execute_run(s, rid)) == "failed"
@@ -361,3 +361,75 @@ def test_scheduled_start_retried_until_it_succeeds(settings, monkeypatch):
 
     asyncio.run(go())
     assert calls == ["schedule"] * 3
+
+
+@pytest.mark.parametrize("cancelled,stopped,sites,errors,statuses,expected", [
+    (False, False, 1, [], ["ok", "ok"], "ok"),
+    (False, False, 1, [], ["ok", "failed"], "partial"),
+    (False, False, 1, [], ["failed", "failed"], "failed"),
+    (False, False, 1, [], ["ok", "skipped"], "ok"),
+    (False, False, 1, [], [], "ok"),
+    (True, False, 1, [], ["ok"], "cancelled"),
+    (True, True, 1, [], ["ok"], "cancelled"),
+    (False, True, 1, [], ["ok", "skipped"], "interrupted"),
+    (False, False, 2, ["a: x", "b: y"], [], "failed"),
+    (False, False, 2, ["a: x"], ["ok"], "partial"),
+    (False, False, 2, ["a: x"], ["failed"], "failed"),
+    (False, False, 2, ["a: x"], [], "partial"),
+])
+def test_final_status(cancelled, stopped, sites, errors, statuses, expected):
+    assert runner._final_status(cancelled, stopped, sites, errors, statuses) == expected
+
+
+async def _wait_for_running_cluster(conn, rid, timeout=60.0):
+    loop = asyncio.get_running_loop()
+    end = loop.time() + timeout
+    while loop.time() < end:
+        if conn.execute("SELECT 1 FROM run_clusters WHERE run_id=? AND status='running'", [rid]).fetchone():
+            return
+        await asyncio.sleep(0.05)
+    raise AssertionError("no cluster reached running")
+
+
+@pytest.mark.live
+def test_cancel_during_run(settings, db, db_path, open_db):
+    """Cancel requested while a cluster is collecting: it finishes, the run ends cancelled."""
+    conn = open_db(db_path)
+    rid = create_run(conn, "manual", "t", Scope())
+
+    async def go():
+        task = asyncio.create_task(execute_run(settings, rid))
+        await _wait_for_running_cluster(conn, rid)
+        request_cancel(conn, rid)
+        return await task
+
+    assert asyncio.run(go()) == "cancelled"
+    statuses = [r[0] for r in conn.execute("SELECT status FROM run_clusters WHERE run_id=?", [rid])]
+    assert statuses and "running" not in statuses and "pending" not in statuses
+
+
+@pytest.mark.live
+@pytest.mark.slow
+def test_scheduler_fires(collected_db, tmp_path, open_db):
+    """COLLECT_DAILY_AT one minute ahead starts a scheduled run (data is fresh, so no startup run)."""
+    import shutil
+    import time
+    from datetime import timedelta
+
+    from inventory.collector.thread import CollectorThread
+
+    shutil.copy(collected_db.db_path, tmp_path / "inventory.db")
+    at = (datetime.now() + timedelta(minutes=1)).strftime("%H:%M")
+    s = collected_db.model_copy(update={"data_dir": tmp_path, "collector_enabled": True, "collect_daily_at": at})
+    conn = open_db(s.db_path)
+    t = CollectorThread(s)
+    t.start()
+    try:
+        deadline = time.monotonic() + 150
+        row = None
+        while time.monotonic() < deadline and row is None:
+            row = conn.execute("SELECT * FROM runs WHERE trigger='schedule'").fetchone()
+            time.sleep(1)
+    finally:
+        t.stop(timeout=120)
+    assert row is not None and row["triggered_by"] is None

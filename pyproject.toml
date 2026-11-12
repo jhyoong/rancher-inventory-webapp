@@ -32,7 +32,11 @@ include = [
 ]
 
 [tool.pytest.ini_options]
-markers = ["live: needs the dev Rancher"]
+markers = [
+    "live: needs the dev Rancher",
+    "slow: takes minutes; skipped unless -m slow is given",
+]
+addopts = "-m 'not slow'"
 filterwarnings = [
     "ignore::starlette.exceptions.StarletteDeprecationWarning",
 ]

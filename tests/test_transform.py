@@ -70,10 +70,10 @@ def test_no_container_commands_or_env_stored(dev_lists, kinds):
                 assert word not in blob, kind
 
 
-def test_counts_match_rancher(collected_db, dev_lists):
+def test_counts_match_rancher(collected_db, dev_lists, open_db):
     from inventory.db.connection import connect
 
-    conn = connect(collected_db.db_path)
+    conn = open_db(collected_db.db_path)
     for kind, items in dev_lists.items():
         n = conn.execute("SELECT count(*) FROM resources WHERE kind=?", [kind]).fetchone()[0]
         assert n == len(items), kind

@@ -4,14 +4,15 @@ import pytest
 
 from inventory.settings import Settings, load_env_file, load_sites
 
-load_env_file(Path(".env"))
+ROOT = Path(__file__).resolve().parent.parent
+load_env_file(ROOT / ".env")
 
 
 @pytest.fixture(autouse=True)
 def env(monkeypatch, tmp_path):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("SITES_FILE", "dev/config/sites.yaml")
-    monkeypatch.setenv("DEFAULTS_DIR", "config/defaults")
+    monkeypatch.setenv("SITES_FILE", str(ROOT / "dev/config/sites.yaml"))
+    monkeypatch.setenv("DEFAULTS_DIR", str(ROOT / "config/defaults"))
     monkeypatch.setenv("COLLECTOR_ENABLED", "false")
 
 
@@ -50,8 +51,8 @@ def dev_live():
     from inventory.settings import site_token
 
     settings = Settings(
-        sites_file=Path("dev/config/sites.yaml"),
-        defaults_dir=Path("config/defaults"),
+        sites_file=ROOT / "dev/config/sites.yaml",
+        defaults_dir=ROOT / "config/defaults",
         collector_enabled=False,
     )
     site = load_sites(settings)[0]
@@ -98,8 +99,8 @@ def live_client(live_loop):
     from inventory.settings import site_token
 
     settings = Settings(
-        sites_file=Path("dev/config/sites.yaml"),
-        defaults_dir=Path("config/defaults"),
+        sites_file=ROOT / "dev/config/sites.yaml",
+        defaults_dir=ROOT / "config/defaults",
         collector_enabled=False,
     )
     site = load_sites(settings)[0]
@@ -128,8 +129,8 @@ def test_password():
 def _web_settings(data_dir: Path) -> Settings:
     return Settings(
         data_dir=data_dir,
-        sites_file=Path("dev/config/sites.yaml"),
-        defaults_dir=Path("config/defaults"),
+        sites_file=ROOT / "dev/config/sites.yaml",
+        defaults_dir=ROOT / "config/defaults",
         collector_enabled=False,
         cookie_secure=False,  # TestClient talks plain http
         admin_user="admin",
@@ -223,8 +224,8 @@ def dev_lists(live_loop, live_client):
     from inventory.collector.kinds import load_kinds
 
     settings = Settings(
-        sites_file=Path("dev/config/sites.yaml"),
-        defaults_dir=Path("config/defaults"),
+        sites_file=ROOT / "dev/config/sites.yaml",
+        defaults_dir=ROOT / "config/defaults",
         collector_enabled=False,
     )
     kinds = load_kinds(settings)
@@ -233,3 +234,20 @@ def dev_lists(live_loop, live_client):
         return {k: await live_client.list_kind("local", s.path) for k, s in kinds.items()}
 
     return live_loop.run_until_complete(go())
+
+
+@pytest.fixture
+def open_db():
+    """connect() for tests; every connection is closed after the test."""
+    from inventory.db.connection import connect
+
+    opened = []
+
+    def _open(path, readonly: bool = False):
+        conn = connect(path, readonly=readonly)
+        opened.append(conn)
+        return conn
+
+    yield _open
+    for conn in opened:
+        conn.close()

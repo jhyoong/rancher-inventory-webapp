@@ -56,3 +56,9 @@ def test_unreachable_url_tls_unknown(settings, tmp_path, monkeypatch):
     assert c.tls == "unknown"
     assert not c.reachable
     assert main(["check-config"]) == 1
+
+
+def test_cli_check_config_settings_error(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("SITES_FILE", str(tmp_path / "missing.yaml"))
+    assert main(["check-config"]) == 1
+    assert "sites file not found" in capsys.readouterr().err

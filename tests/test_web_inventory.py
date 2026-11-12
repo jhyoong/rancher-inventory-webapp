@@ -28,8 +28,8 @@ def test_inventory_filters(admin_client_collected):
     assert get("/inventory?flag=bogus").status_code == 400
 
 
-def test_inventory_label_filter(collected_db, admin_client_collected):
-    conn = connect(collected_db.db_path, readonly=True)
+def test_inventory_label_filter(collected_db, admin_client_collected, open_db):
+    conn = open_db(collected_db.db_path, readonly=True)
     try:
         labels = json.loads(conn.execute("SELECT labels FROM clusters WHERE cluster_id='local'").fetchone()[0])
     finally:
@@ -47,8 +47,8 @@ def test_network_search_node_ip(admin_client_collected, dev_lists):
     assert "local" in admin_client_collected.get(f"/network?q={ip}").text
 
 
-def test_network_prefix(collected_db):
-    conn = connect(collected_db.db_path, readonly=True)
+def test_network_prefix(collected_db, open_db):
+    conn = open_db(collected_db.db_path, readonly=True)
     try:
         assert len(queries.search_addresses(conn, "192.168.50.")) >= 1
         assert queries.search_addresses(conn, "%") == []
@@ -64,8 +64,8 @@ def test_helm_page_lists_rancher_chart(admin_client_collected):
     assert "deployed" in admin_client_collected.get("/helm?chart=cert-manager").text
 
 
-def test_helm_matches_catalog(collected_db, dev_lists):
-    conn = connect(collected_db.db_path, readonly=True)
+def test_helm_matches_catalog(collected_db, dev_lists, open_db):
+    conn = open_db(collected_db.db_path, readonly=True)
     try:
         assert sum(c["releases"] for c in queries.helm_charts(conn)) == len(dev_lists["helmreleases"])
     finally:
@@ -77,8 +77,8 @@ def test_crds_custom_toggle(admin_client_collected):
     assert "management.cattle.io" not in admin_client_collected.get("/crds?custom_only=1").text
 
 
-def test_annotations_page(collected_db, admin_client_collected):
-    conn = connect(collected_db.db_path, readonly=True)
+def test_annotations_page(collected_db, admin_client_collected, open_db):
+    conn = open_db(collected_db.db_path, readonly=True)
     try:
         keys = queries.annotation_keys(conn)
         assert keys
@@ -139,9 +139,9 @@ def test_failed_marker(failed_clients, path):
     assert "boom-unreachable-xyz" not in v
 
 
-def test_network_lists_are_capped(admin_client_collected, monkeypatch):
+def test_network_lists_are_capped(admin_client_collected, monkeypatch, open_db):
     """Each /network list stops at NETWORK_LIMIT rows and says so."""
-    conn = connect(admin_client_collected.app.state.settings.db_path, readonly=True)
+    conn = open_db(admin_client_collected.app.state.settings.db_path, readonly=True)
     try:
         assert len(queries.node_ips(conn)) == 3
         assert len(queries.node_ips(conn, limit=1)) == 1
@@ -160,9 +160,9 @@ def test_refresh_site_button(admin_client_collected):
         assert 'name="site" value="dev"' in text and "Refresh this site" in text, path
 
 
-def test_failed_marker_survives_running_row(failed_clients, collected_db):
+def test_failed_marker_survives_running_row(failed_clients, collected_db, open_db):
     admin, _ = failed_clients
-    conn = connect(admin.app.state.settings.db_path)
+    conn = open_db(admin.app.state.settings.db_path)
     try:
         conn.execute(
             "INSERT INTO runs (id, started_at, status, trigger, scope)"
@@ -175,8 +175,8 @@ def test_failed_marker_survives_running_row(failed_clients, collected_db):
         assert "last collection failed" in admin.get(path).text, path
 
 
-def test_daemonset_ready_fields(collected_db):
-    conn = connect(collected_db.db_path)
+def test_daemonset_ready_fields(collected_db, open_db):
+    conn = open_db(collected_db.db_path)
     try:
         rows = [json.loads(r[0]) for r in conn.execute("SELECT data FROM resources WHERE kind='daemonsets'")]
     finally:
@@ -187,9 +187,9 @@ def test_daemonset_ready_fields(collected_db):
         assert "readyReplicas" not in d.get("status", {}) and "replicas" not in d.get("spec", {})
 
 
-def test_bad_label_json_is_empty(collected_db, tmp_path):
+def test_bad_label_json_is_empty(collected_db, tmp_path, open_db):
     shutil.copy(collected_db.db_path, tmp_path / "inventory.db")
-    conn = connect(tmp_path / "inventory.db")
+    conn = open_db(tmp_path / "inventory.db")
     try:
         conn.execute("UPDATE clusters SET labels='{not json' WHERE cluster_id='local'")
         assert queries.inventory_rows(conn, label="provider.cattle.io") == []
@@ -197,8 +197,8 @@ def test_bad_label_json_is_empty(collected_db, tmp_path):
         conn.close()
 
 
-def test_annotation_objects_cap_note(admin_client_collected, monkeypatch):
-    conn = connect(admin_client_collected.app.state.settings.db_path, readonly=True)
+def test_annotation_objects_cap_note(admin_client_collected, monkeypatch, open_db):
+    conn = open_db(admin_client_collected.app.state.settings.db_path, readonly=True)
     try:
         key = queries.annotation_keys(conn)[0]["key"]
     finally:

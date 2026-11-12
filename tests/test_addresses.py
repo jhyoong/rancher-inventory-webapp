@@ -54,10 +54,10 @@ def test_service_cluster_ips(dev_lists, kinds):
 
 
 @pytest.mark.live
-def test_ingress_nginx_lb(collected_db):
+def test_ingress_nginx_lb(collected_db, open_db):
     from inventory.db.connection import connect
 
-    conn = connect(collected_db.db_path)
+    conn = open_db(collected_db.db_path)
     try:
         rows = conn.execute("SELECT role FROM addresses WHERE address = '192.168.50.210'").fetchall()
     finally:
