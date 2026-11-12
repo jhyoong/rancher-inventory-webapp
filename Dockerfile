@@ -11,6 +11,7 @@ RUN pip install --no-index --find-links /wheels rancher-inventory \
     && rm -rf /wheels
 COPY config/defaults/ /app/defaults/
 ENV DEFAULTS_DIR=/app/defaults DATA_DIR=/data SITES_FILE=/config/sites.yaml PYTHONDONTWRITEBYTECODE=1
+RUN mkdir -p /data && chown 10001:10001 /data
 USER 10001
 VOLUME /data
 EXPOSE 8443

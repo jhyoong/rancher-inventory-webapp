@@ -4,3 +4,8 @@ dev/
 tests/
 .git
 docs/
+__pycache__/
+*.pyc
+.pytest_cache/
+.superpowers/
+reference/
