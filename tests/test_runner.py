@@ -113,15 +113,62 @@ def test_unexpected_cluster_error_is_contained(settings, db, db_path, monkeypatc
 def test_collector_thread_refuses_second_run(settings, db):
     from inventory.collector.thread import CollectorThread
 
-    rid = create_run(db, "manual", "a", Scope())
+    stale = create_run(db, "manual", "a", Scope())
     t = CollectorThread(settings)  # COLLECTOR_ENABLED=false in tests: no schedule
     t.start()
     try:
+        # start() marks leftover runs interrupted even with the collector off
+        assert db.execute("SELECT status FROM runs WHERE id=?", [stale]).fetchone()[0] == "interrupted"
+        rid = create_run(db, "manual", "a", Scope())
         with pytest.raises(RunInProgress) as e:
             t.request_run("manual", "b", Scope())
         assert e.value.run_id == rid
     finally:
         t.stop(timeout=5)
     assert not t.is_alive()
-    # disabled collector leaves the running row alone
-    assert db.execute("SELECT status FROM runs WHERE id=?", [rid]).fetchone()[0] == "running"
+
+
+def test_last_good_run_ignores_scoped_runs(db):
+    full = create_run(db, "manual", "a", Scope())
+    db.execute("UPDATE runs SET status='ok' WHERE id=?", [full])
+    scoped = create_run(db, "manual", "a", Scope(site="dev", cluster_id="local"))
+    db.execute("UPDATE runs SET status='ok' WHERE id=?", [scoped])
+    assert last_good_run(db)["id"] == full
+
+
+def test_empty_scope_refused(db):
+    rid = create_run(db, "manual", "a", Scope())
+    db.execute("UPDATE runs SET status='ok' WHERE id=?", [rid])
+    with pytest.raises(ValueError):
+        create_run(db, "manual", "a", retry_scope(db, rid))
+    assert db.execute("SELECT count(*) FROM runs").fetchone()[0] == 1
+
+
+def test_finish_prunes_old_run_rows(db):
+    ids = []
+    for _ in range(31):
+        rid = create_run(db, "manual", "a", Scope())
+        db.execute("INSERT INTO run_clusters (run_id, site, cluster_id, status) VALUES (?, 'dev', 'c1', 'ok')", [rid])
+        db.execute("INSERT INTO run_kinds (run_id, site, cluster_id, kind, status) VALUES (?, 'dev', 'c1', 'nodes', 'ok')", [rid])
+        runner._finish(db, rid, "ok", None)
+        ids.append(rid)
+    for table in ("run_clusters", "run_kinds"):
+        kept = [r[0] for r in db.execute(f"SELECT run_id FROM {table} ORDER BY run_id")]
+        assert kept == ids[1:]
+
+
+@pytest.mark.live
+def test_cancelled_task_ends_interrupted(settings, db, db_path):
+    rid = create_run(connect(db_path), "manual", "t", Scope())
+
+    async def go():
+        task = asyncio.create_task(execute_run(settings, rid))
+        await asyncio.sleep(0.5)  # inside the cluster listing (first connection takes ~5 s here)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(go())
+    run = connect(db_path).execute("SELECT status, finished_at FROM runs WHERE id=?", [rid]).fetchone()
+    assert run["status"] == "interrupted" and run["finished_at"]
+    assert create_run(connect(db_path), "manual", "t", Scope()) > rid

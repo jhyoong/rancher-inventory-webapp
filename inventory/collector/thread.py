@@ -39,14 +39,14 @@ class CollectorThread(threading.Thread):
         self._tasks: set[asyncio.Task] = set()
 
     def start(self) -> None:
-        if self.settings.collector_enabled:
-            conn = connect(self.settings.db_path)
-            try:
-                n = mark_interrupted(conn)
-            finally:
-                conn.close()
-            if n:
-                log.info("marked %d unfinished run(s) as interrupted", n)
+        # Always, even with the collector off: a run left 'running' would block all runs.
+        conn = connect(self.settings.db_path)
+        try:
+            n = mark_interrupted(conn)
+        finally:
+            conn.close()
+        if n:
+            log.info("marked %d unfinished run(s) as interrupted", n)
         super().start()
 
     def request_run(self, trigger: str, triggered_by: str | None, scope: Scope) -> int:
@@ -76,6 +76,12 @@ class CollectorThread(threading.Thread):
         task = self._loop.create_task(execute_run(self.settings, run_id, should_stop=self._stop_flag.is_set))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
+        task.add_done_callback(self._log_failure)
+
+    @staticmethod
+    def _log_failure(task: asyncio.Task) -> None:
+        if not task.cancelled() and task.exception() is not None:
+            log.error("run task failed", exc_info=task.exception())
 
     def run(self) -> None:
         asyncio.set_event_loop(self._loop)

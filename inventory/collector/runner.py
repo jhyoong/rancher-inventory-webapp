@@ -18,7 +18,7 @@ from inventory.settings import ConfigError, Settings, Site, load_sites, site_tok
 
 log = logging.getLogger(__name__)
 
-KEEP_RUN_CLUSTERS = 30
+KEEP_RUNS = 30  # run_clusters and run_kinds rows are kept for this many runs
 
 
 def _now() -> str:
@@ -75,6 +75,8 @@ class RunInProgress(Exception):
 
 
 def create_run(conn: sqlite3.Connection, trigger: str, triggered_by: str | None, scope: Scope) -> int:
+    if scope.clusters is not None and not scope.clusters:
+        raise ValueError("scope has no clusters")
     with transaction(conn):
         row = conn.execute("SELECT id FROM runs WHERE status='running' ORDER BY id DESC LIMIT 1").fetchone()
         if row is not None:
@@ -111,8 +113,10 @@ def mark_interrupted(conn: sqlite3.Connection) -> int:
 
 
 def last_good_run(conn: sqlite3.Connection) -> sqlite3.Row | None:
+    """Newest full-scope run that ended ok or partial. Scoped runs do not count."""
     return conn.execute(
-        "SELECT * FROM runs WHERE status IN ('ok', 'partial') ORDER BY id DESC LIMIT 1"
+        "SELECT * FROM runs WHERE status IN ('ok', 'partial') AND scope=? ORDER BY id DESC LIMIT 1",
+        (Scope().to_json(),),
     ).fetchone()
 
 
@@ -153,14 +157,26 @@ async def execute_run(
     try:
         try:
             return await _execute(settings, conn, run_id, should_stop or (lambda: False))
+        except asyncio.CancelledError:
+            log.warning("run %s was cancelled", run_id)
+            _finish_safely(conn, run_id, "interrupted", "run task was cancelled")
+            raise
         except Exception as e:
             log.exception("run %s failed", run_id)
-            if conn.in_transaction:
-                conn.execute("ROLLBACK")
-            _finish(conn, run_id, "failed", f"{type(e).__name__}: {e}")
+            _finish_safely(conn, run_id, "failed", f"{type(e).__name__}: {e}")
             return "failed"
     finally:
         conn.close()
+
+
+def _finish_safely(conn: sqlite3.Connection, run_id: int, status: str, error: str) -> None:
+    """Best effort final update on an error path, so the run does not stay 'running'."""
+    try:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        _finish(conn, run_id, status, error)
+    except Exception:
+        log.exception("could not record final status %s for run %s", status, run_id)
 
 
 def _finish(conn: sqlite3.Connection, run_id: int, status: str, error: str | None) -> None:
@@ -173,10 +189,11 @@ def _finish(conn: sqlite3.Connection, run_id: int, status: str, error: str | Non
             "UPDATE runs SET status=?, finished_at=?, error=? WHERE id=?",
             (status, _now(), error, run_id),
         )
-        conn.execute(
-            "DELETE FROM run_clusters WHERE run_id NOT IN (SELECT id FROM runs ORDER BY id DESC LIMIT ?)",
-            (KEEP_RUN_CLUSTERS,),
-        )
+        for table in ("run_clusters", "run_kinds"):
+            conn.execute(
+                f"DELETE FROM {table} WHERE run_id NOT IN (SELECT id FROM runs ORDER BY id DESC LIMIT ?)",
+                (KEEP_RUNS,),
+            )
 
 
 async def _execute(settings: Settings, conn: sqlite3.Connection, run_id: int, should_stop: Callable[[], bool]) -> str:
