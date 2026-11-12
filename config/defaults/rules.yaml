@@ -75,3 +75,12 @@ platform_roles:
 complexity:            # thresholds of the complexity flags (spec 6.14)
   min_k8s_minor: 32    # flag "k8s<1.32" below this minor version
   many_crds: 30        # flag "many-crds" above this many CRDs in use (needs cr_counts)
+
+# Opt-in collectors (spec 6.12). Each needs extra RBAC from deploy/inventory-reader-extended.yaml.
+# When off they make no calls. A 401 or 403 is logged and skipped; it never fails a cluster.
+optional_collectors:
+  cr_counts:              {enabled: false, groups: []}   # instance count per CRD of these API groups
+  pvc_usage:              {enabled: false}   # used bytes per PVC from kubelet stats (nodes/proxy)
+  deprecated_api_metrics: {enabled: false}   # apiserver_requested_deprecated_apis from /metrics
+  secret_types:           {enabled: false}   # count of Secrets per type (table view, no data)
+  nginx_config_keys:      {enabled: false}   # keys of ingress-nginx ConfigMaps, never values

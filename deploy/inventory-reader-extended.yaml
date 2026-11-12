@@ -1,0 +1,36 @@
+# Second cluster RoleTemplate for the opt-in collectors (spec 6.12). Off by default.
+# Grant it per site, and only after security sign-off for each collector you enable.
+# Keep only the blocks of the collectors you switch on in rules.yaml (optional_collectors).
+# Apply on the Rancher local cluster: kubectl apply -f inventory-reader-extended.yaml
+# Then bind it to the inventory-reader user on each cluster (as in README step 3).
+apiVersion: management.cattle.io/v3
+kind: RoleTemplate
+metadata:
+  name: inventory-reader-extended
+displayName: inventory-reader-extended
+context: cluster
+rules:
+  # cr_counts: instance count per CRD, one rule per API group listed in rules.yaml.
+  # Example for one group. A "*" group also covers Secrets; avoid it.
+  # - apiGroups: [acid.zalan.do]
+  #   resources: ["*"]
+  #   verbs: [get, list]
+
+  # pvc_usage: kubelet stats summary. The kubelet API has been reported as usable for
+  # command execution; grant only with sign-off.
+  - apiGroups: [""]
+    resources: [nodes/proxy]
+    verbs: [get]
+
+  # deprecated_api_metrics: API server /metrics (non-resource URL). Large response.
+  # Non-resource URLs need a ClusterRole; Rancher RoleTemplates accept them for context: cluster.
+  - nonResourceURLs: [/metrics]
+    verbs: [get]
+
+  # secret_types: list Secrets. The collector asks for the table view (type column only),
+  # but this rule grants read of all Secrets.
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [list]
+
+  # nginx_config_keys: no extra rule. get on configmaps is already in inventory-reader.

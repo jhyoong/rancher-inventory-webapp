@@ -17,6 +17,7 @@ class Rules:
     rancher_generated: dict[str, list[str]] = field(default_factory=dict)
     platform_roles: dict = field(default_factory=dict)
     complexity: dict[str, int] = field(default_factory=dict)
+    optional_collectors: dict[str, dict] = field(default_factory=dict)
 
 
 def _read_yaml(path: Path) -> dict:
@@ -80,7 +81,24 @@ def load_rules(settings) -> Rules:
     except (TypeError, ValueError):
         raise ConfigError(f"complexity values must be numbers in {path}") from None
 
+    known = ("cr_counts", "pvc_usage", "deprecated_api_metrics", "secret_types", "nginx_config_keys")
+    raw_oc = data.get("optional_collectors") or {}
+    if not isinstance(raw_oc, dict):
+        raise ConfigError(f"optional_collectors must be a mapping in {path}")
+    optional = {name: {"enabled": False} for name in known}
+    for name, cfg in raw_oc.items():
+        if name not in known:
+            raise ConfigError(f"unknown optional collector {name!r} in {path} (known: {', '.join(known)})")
+        cfg = cfg or {}
+        if not isinstance(cfg, dict):
+            raise ConfigError(f"optional_collectors.{name} must be a mapping in {path}")
+        optional[name] = {
+            **cfg, "enabled": bool(cfg.get("enabled", False)),
+            **({"groups": strings(cfg.get("groups"), f"optional_collectors.{name}.groups")} if name == "cr_counts" else {}),
+        }  # fmt: skip
+
     return Rules(
+        optional_collectors=optional,
         complexity=complexity,
         rancher_generated=string_map(data.get("rancher_generated"), "rancher_generated"),
         platform_roles=string_map(data.get("platform_roles"), "platform_roles", ("helm_in_system_namespace",)),

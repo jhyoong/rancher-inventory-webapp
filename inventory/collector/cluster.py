@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from inventory.collector.classify import build_profiles
 from inventory.collector.kinds import KindSpec
+from inventory.collector.optional import run_optional
 from inventory.collector.platform import collect_api_versions
 from inventory.collector.rules import Rules
 from inventory.collector.transform import ClusterContext, Trimmed, skip_object, trim
@@ -159,6 +160,9 @@ async def collect_cluster(
             served = await collect_api_versions(client, cid)
         except RancherError as e:
             logger.info("served API versions skipped for %s/%s: %s", site, cid, e)
+
+    if rules is not None and not stopped and not failed_kinds:
+        await run_optional(client, conn, site, cid, run_id, rules)
 
     error = None
     if not stopped and not failed_kinds:

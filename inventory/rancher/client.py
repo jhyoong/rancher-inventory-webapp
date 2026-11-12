@@ -38,8 +38,29 @@ class RancherClient:
     async def aclose(self) -> None:
         await self._http.aclose()
 
-    async def get_json(self, path: str, params: dict | None = None) -> dict:
+    async def _get(self, path: str, params: dict | None, headers: dict | None):
         url = f"{self._base}{path}"
+        try:
+            resp = await self._http.get(path, params=params, headers=headers)
+        except httpx.HTTPError as e:
+            raise RancherError(
+                f"request failed: {type(e).__name__} for {url}", None, url
+            ) from None
+        if resp.status_code != 200:
+            raise RancherError(f"HTTP {resp.status_code} for {url}", resp.status_code, url)
+        return resp
+
+    async def get_text(self, path: str, params: dict | None = None) -> str:
+        return (await self._get(path, params, None)).text
+
+    async def get_json(self, path: str, params: dict | None = None, headers: dict | None = None) -> dict:
+        url = f"{self._base}{path}"
+        if headers:
+            resp = await self._get(path, params, headers)
+            try:
+                return resp.json()
+            except ValueError:
+                raise RancherError(f"invalid JSON from {url}", resp.status_code, url) from None
         try:
             resp = await self._http.get(path, params=params)
         except httpx.HTTPError as e:

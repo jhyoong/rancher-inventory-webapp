@@ -8,6 +8,7 @@
   <div class="card"><div class="num">{{ overview.clusters }}</div>Clusters</div>
   <div class="card"><div class="num">{{ overview.nodes }}</div>Nodes</div>
 </div>
+<p class="muted">Opt-in collectors: {{ optins | join(", ") if optins else "none active" }}</p>
 <h2>Clusters per class</h2>
 {% if classes %}
 <div class="cards">
