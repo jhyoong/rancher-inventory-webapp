@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -18,6 +19,8 @@ from inventory.db.repo import (
     write_run_kind,
 )
 from inventory.rancher.client import RancherClient, RancherError
+
+logger = logging.getLogger(__name__)
 
 NODE_USAGE_PATH = "/apis/metrics.k8s.io/v1beta1/nodes"
 
@@ -111,6 +114,7 @@ async def collect_cluster(
         try:
             build_profiles(conn, site, cid, run_id, rules)
         except Exception as e:  # collected data stays; the cluster is marked failed
+            logger.exception("profile build failed for %s/%s", site, cid)
             error = f"profile build failed: {e}"
     if stopped:
         error = "stopped"

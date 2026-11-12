@@ -54,8 +54,8 @@ def _bytes(value) -> int | None:
 def build_profiles(conn, site: str, cluster_id: str, run_id: int, rules: Rules) -> Flags:
     """Rebuild namespace_profile rows and the cluster_profile row from stored resources.
 
-    Flags come from user namespaces only. The counts in cluster_profile are totals
-    over all namespaces.
+    Flags and the statefulset, PVC and Helm counts in cluster_profile come from user
+    namespaces only. lb_services and ingresses count all namespaces.
     """
     where = "WHERE site=? AND cluster_id=?"
     args = (site, cluster_id)
@@ -91,7 +91,9 @@ def build_profiles(conn, site: str, cluster_id: str, run_id: int, rules: Rules) 
             helm_labeled.add(n)
 
     for r in rows(
-        f"""SELECT namespace, json_extract(data, '$.status.capacity.storage') AS cap
+        f"""SELECT namespace,
+                   coalesce(json_extract(data, '$.status.capacity.storage'),
+                            json_extract(data, '$.spec.resources.requests.storage')) AS cap
             FROM resources {where} AND kind='persistentvolumeclaims'
               AND json_extract(data, '$.status.phase')='Bound'"""
     ):
@@ -102,14 +104,12 @@ def build_profiles(conn, site: str, cluster_id: str, run_id: int, rules: Rules) 
         if size is not None:
             ns[n]["pvc_bytes"] += size
 
-    deployed_helm = 0
     for r in rows(
         f"""SELECT namespace FROM resources {where} AND kind='helmreleases'
               AND json_extract(data, '$.spec.info.status')='deployed'"""
     ):
         names.add(r["namespace"])
         ns[r["namespace"]]["helm_releases"] += 1
-        deployed_helm += 1
 
     for r in rows(
         f"SELECT namespace, json_extract(data, '$.spec.type') AS t FROM resources {where} AND kind='services'"
@@ -160,8 +160,8 @@ def build_profiles(conn, site: str, cluster_id: str, run_id: int, rules: Rules) 
         hostpath=any(ns[n]["hostpath_workloads"] for n in user) or bool(local_pv),
     )
 
-    def total(key: str) -> int:
-        return sum(ns[n][key] for n in names)
+    def total(key: str, only_user: bool = False) -> int:
+        return sum(ns[n][key] for n in (user if only_user else names))
 
     with transaction(conn):
         conn.execute("DELETE FROM namespace_profile " + where, args)
@@ -186,8 +186,8 @@ def build_profiles(conn, site: str, cluster_id: str, run_id: int, rules: Rules) 
             " network, updated_run) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,?)",
             (
                 site, cluster_id, class_label(flags), int(flags.stateful), int(flags.helm),
-                int(flags.custom_crds), int(flags.hostpath), total("statefulsets"), total("pvc_bound"),
-                total("pvc_bytes"), deployed_helm, json.dumps(groups), total("lb_services"),
+                int(flags.custom_crds), int(flags.hostpath), total("statefulsets", True), total("pvc_bound", True),
+                total("pvc_bytes", True), total("helm_releases", True), json.dumps(groups), total("lb_services"),
                 total("ingresses"), run_id,
             ),
         )  # fmt: skip
