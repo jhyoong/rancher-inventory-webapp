@@ -8,7 +8,7 @@ kinds:
   namespaces:
     path: /api/v1/namespaces
     scope: cluster
-    keep: [status.phase]
+    keep: [status.phase, metadata.uid]   # kube-system UID is the cluster UID
     annotations: true
 
   pods:
@@ -64,8 +64,9 @@ kinds:
     scope: cluster
     keep: [spec.capacity.storage, spec.storageClassName, spec.claimRef.namespace,
            spec.claimRef.name, status.phase]
+    # derived: access_modes, volume_mode, reclaim, source, pinned (no paths or servers)
 
-  persistentvolumeclaims:
+  persistentvolumeclaims:   # listed after pods: mounted and used_by come from pod claims
     path: /api/v1/persistentvolumeclaims
     scope: namespaced
     keep: [spec.storageClassName, spec.resources.requests.storage, status.phase,
@@ -76,6 +77,16 @@ kinds:
     path: /apis/storage.k8s.io/v1/storageclasses
     scope: cluster
     keep: [provisioner, reclaimPolicy, volumeBindingMode]
+    # derived: allow_expansion, default, parameter_keys (never values)
+
+  csidrivers:
+    path: /apis/storage.k8s.io/v1/csidrivers
+    scope: cluster
+
+  volumesnapshots:   # 404 means the snapshot CRDs are not installed
+    path: /apis/snapshot.storage.k8s.io/v1/volumesnapshots
+    scope: namespaced
+    metadata_only: true
 
   configmaps:
     path: /api/v1/configmaps
@@ -89,6 +100,8 @@ kinds:
            spec.externalName, spec.ports, status.loadBalancer.ingress]
     annotations: true
     addresses: true
+    # derived: headless, has_selector, node_ports, external_traffic_policy, lb_class,
+    #          ip_families, session_affinity, annotation_keys
 
   ingresses:
     path: /apis/networking.k8s.io/v1/ingresses
@@ -96,6 +109,52 @@ kinds:
     keep: [spec.ingressClassName, spec.rules, spec.tls, status.loadBalancer.ingress]
     annotations: true
     addresses: true
+    # derived: class, default_backend, nginx_annotations, nginx_categories, has_snippet, annotation_keys
+
+  ingressclasses:
+    path: /apis/networking.k8s.io/v1/ingressclasses
+    scope: cluster
+    keep: [spec.controller]
+
+  networkpolicies:
+    path: /apis/networking.k8s.io/v1/networkpolicies
+    scope: namespaced
+    # derived only: policy_types, namespace_wide, ipblock_peers (no CIDRs)
+
+  priorityclasses:
+    path: /apis/scheduling.k8s.io/v1/priorityclasses
+    scope: cluster
+    keep: [value, globalDefault]
+
+  poddisruptionbudgets:
+    path: /apis/policy/v1/poddisruptionbudgets
+    scope: namespaced
+    keep: [spec.minAvailable, spec.maxUnavailable, status.expectedPods, status.disruptionsAllowed]
+
+  horizontalpodautoscalers:
+    path: /apis/autoscaling/v2/horizontalpodautoscalers
+    scope: namespaced
+    keep: [spec.scaleTargetRef.kind, spec.minReplicas, spec.maxReplicas]
+
+  resourcequotas:
+    path: /api/v1/resourcequotas
+    scope: namespaced
+    # derived only: quota_cpu, quota_mem, quota_storage
+
+  limitranges:
+    path: /api/v1/limitranges
+    scope: namespaced
+    metadata_only: true
+
+  serviceaccounts:
+    path: /api/v1/serviceaccounts
+    scope: namespaced
+    metadata_only: true
+
+  roles:
+    path: /apis/rbac.authorization.k8s.io/v1/roles
+    scope: namespaced
+    metadata_only: true
 
   customresourcedefinitions:
     path: /apis/apiextensions.k8s.io/v1/customresourcedefinitions

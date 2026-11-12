@@ -196,12 +196,14 @@ def build_profiles(
         conn.execute(
             "INSERT INTO cluster_profile (site, cluster_id, class, stateful, helm, custom_crds, hostpath,"
             " statefulsets, pvc_bound, pvc_bytes, helm_releases, crd_groups, lb_services, ingresses,"
-            " network, updated_run) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,?)",
+            " network, updated_run, cluster_uid) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,?,"
+            " (SELECT json_extract(data, '$.metadata.uid') FROM resources"
+            "  WHERE site=? AND cluster_id=? AND kind='namespaces' AND name='kube-system'))",
             (
                 site, cluster_id, class_label(flags), int(flags.stateful), int(flags.helm),
                 int(flags.custom_crds), int(flags.hostpath), total("statefulsets", True), total("pvc_bound", True),
                 total("pvc_bytes", True), total("helm_releases", True), json.dumps(groups), total("lb_services"),
-                total("ingresses"), run_id,
+                total("ingresses"), run_id, site, cluster_id,
             ),
         )  # fmt: skip
     return flags

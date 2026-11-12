@@ -7,7 +7,7 @@ from inventory.collector.classify import build_profiles
 from inventory.collector.kinds import KindSpec
 from inventory.collector.podspec import skip_object
 from inventory.collector.rules import Rules
-from inventory.collector.transform import trim
+from inventory.collector.transform import ClusterContext, Trimmed, trim
 from inventory.collector.units import metrics_from_cluster, parse_bytes, parse_cpu
 from inventory.db.repo import (
     delete_stale,
@@ -25,6 +25,15 @@ logger = logging.getLogger(__name__)
 
 NODE_USAGE_PATH = "/apis/metrics.k8s.io/v1beta1/nodes"
 POD_USAGE_PATH = "/apis/metrics.k8s.io/v1beta1/pods"
+
+
+def pvc_users(pods: list[Trimmed]) -> dict[tuple[str, str], list[str]]:
+    """(namespace, claim) -> sorted owner kinds of the pods that mount it ("Pod" for standalone pods)."""
+    out: dict[tuple[str, str], set[str]] = {}
+    for p in pods:
+        for claim in p.data.get("pvc_claims") or []:
+            out.setdefault((p.namespace, claim), set()).add(p.data.get("owner_kind") or "Pod")
+    return {k: sorted(v) for k, v in out.items()}
 
 
 def pod_usage_by_namespace(items: list[dict]) -> dict[str, tuple[int, int]]:
@@ -81,6 +90,7 @@ async def collect_cluster(
         mark_cluster_failed(conn, site, cid, error)
         return ClusterResult("failed", total, 0, 0, error)
 
+    ctx = ClusterContext()
     kind_status: dict[str, str] = {}
     objects = 0
     done = 0
@@ -104,7 +114,9 @@ async def collect_cluster(
                 status = "failed"
                 failed_kinds.append(spec.name)
         if raw is not None:
-            items = [trim(spec, o, rules) for o in raw if not skip_object(spec.name, o)]
+            items = [trim(spec, o, rules, ctx) for o in raw if not skip_object(spec.name, o)]
+            if spec.name == "pods":
+                ctx.pvc_users = pvc_users(items)
             count = len(items)
             with transaction(conn):
                 upsert_resources(conn, site, cid, run_id, items)

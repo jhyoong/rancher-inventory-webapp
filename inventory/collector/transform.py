@@ -5,7 +5,23 @@ from dataclasses import astuple, dataclass, field
 from inventory.collector.addresses import Address, extract_addresses
 from inventory.collector.annotations import filter_annotations
 from inventory.collector.kinds import KindSpec
+from inventory.collector.netpolicy import (
+    derive_hpa,
+    derive_ingress,
+    derive_ingressclass,
+    derive_netpol,
+    derive_pdb,
+    derive_resourcequota,
+    derive_service,
+)
 from inventory.collector.podspec import derive_pod, derive_workload
+from inventory.collector.storage import (
+    derive_csidriver,
+    derive_node_provider,
+    derive_pv,
+    derive_pvc,
+    derive_storageclass,
+)
 from inventory.collector.rules import Rules
 
 
@@ -69,6 +85,7 @@ def _derive_node(obj: dict, data: dict) -> None:
     prefix = "node-role.kubernetes.io/"
     labels = (obj.get("metadata") or {}).get("labels") or {}
     data["roles"] = sorted(k[len(prefix):] for k in labels if k.startswith(prefix) and k[len(prefix):])
+    data["provider"] = derive_node_provider((obj.get("spec") or {}).get("providerID") or "")
 
 
 def _derive_statefulset(obj: dict, data: dict) -> None:
@@ -83,11 +100,6 @@ def _derive_statefulset(obj: dict, data: dict) -> None:
             }
         )
     data["volume_claim_templates"] = out
-
-
-def _derive_pv(obj: dict, data: dict) -> None:
-    spec = obj.get("spec") or {}
-    data["local"] = bool(spec.get("local") or spec.get("hostPath"))
 
 
 def _derive_pod(obj: dict, data: dict) -> None:
@@ -130,18 +142,40 @@ def _derive_helmrelease(obj: dict, data: dict) -> None:
 _DERIVE = {
     "nodes": _derive_node,
     "statefulsets": _derive_statefulset,
-    "persistentvolumes": _derive_pv,
     "pods": _derive_pod,
     "customresourcedefinitions": _derive_crd,
     "helmreleases": _derive_helmrelease,
 }
 
 
-def trim(kind: KindSpec, obj: dict, rules: Rules | None = None) -> Trimmed:
+# kind -> function(obj) -> dict of derived fields merged into data
+_DERIVED = {
+    "persistentvolumes": derive_pv,
+    "storageclasses": derive_storageclass,
+    "csidrivers": derive_csidriver,
+    "services": derive_service,
+    "ingresses": derive_ingress,
+    "ingressclasses": derive_ingressclass,
+    "poddisruptionbudgets": derive_pdb,
+    "horizontalpodautoscalers": derive_hpa,
+    "resourcequotas": derive_resourcequota,
+    "networkpolicies": derive_netpol,
+}
+
+
+@dataclass
+class ClusterContext:
+    """Facts from kinds listed earlier in the same cluster run. None means not known."""
+
+    pvc_users: dict[tuple[str, str], list[str]] | None = None
+
+
+def trim(kind: KindSpec, obj: dict, rules: Rules | None = None, ctx: ClusterContext | None = None) -> Trimmed:
     """Reduce a Kubernetes object to the fields we store.
 
     Annotations need `rules` and a kind with `annotations: true`. Addresses are
-    filled for kinds with `addresses: true` and for nodes.
+    filled for kinds with `addresses: true` and for nodes. PVC `mounted` and
+    `used_by` need `ctx.pvc_users` from the pods of the same cluster.
     """
     meta = obj.get("metadata") or {}
     data = {}
@@ -155,6 +189,11 @@ def trim(kind: KindSpec, obj: dict, rules: Rules | None = None) -> Trimmed:
         derive = _DERIVE.get(kind.name)
         if derive:
             derive(obj, data)
+        if kind.name in _DERIVED:
+            data.update(_DERIVED[kind.name](obj))
+        if kind.name == "persistentvolumeclaims":
+            users = ctx.pvc_users if ctx else None
+            data.update(derive_pvc(obj, set(users) if users is not None else None, users))
     labels = {str(k): str(v) for k, v in (meta.get("labels") or {}).items()}
     t = Trimmed(
         kind=kind.name,
