@@ -33,3 +33,6 @@ include = [
 
 [tool.pytest.ini_options]
 markers = ["live: needs the dev Rancher"]
+filterwarnings = [
+    "ignore::starlette.exceptions.StarletteDeprecationWarning",
+]

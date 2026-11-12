@@ -2,7 +2,8 @@ import hashlib
 import json
 from dataclasses import astuple, dataclass, field
 
-from inventory.collector.addresses import Address
+from inventory.collector.addresses import Address, extract_addresses
+from inventory.collector.annotations import filter_annotations
 from inventory.collector.kinds import KindSpec
 from inventory.collector.rules import Rules
 from inventory.collector.units import parse_bytes, parse_cpu
@@ -105,14 +106,22 @@ def _derive_pv(obj: dict, data: dict) -> None:
     data["local"] = bool(spec.get("local") or spec.get("hostPath"))
 
 
+def _quantity(parse, value) -> int | None:
+    """Parse a quantity, or None when it cannot be read."""
+    try:
+        return parse(value)
+    except (ArithmeticError, ValueError, TypeError):
+        return None
+
+
 def _derive_pod(obj: dict, data: dict) -> None:
     cpu = mem = 0
     for c in (obj.get("spec") or {}).get("containers") or []:
         req = ((c or {}).get("resources") or {}).get("requests") or {}
         if req.get("cpu"):
-            cpu += parse_cpu(req["cpu"])
+            cpu += _quantity(parse_cpu, req["cpu"]) or 0
         if req.get("memory"):
-            mem += parse_bytes(req["memory"])
+            mem += _quantity(parse_bytes, req["memory"]) or 0
     data["cpu_req_m"] = cpu
     data["mem_req_b"] = mem
 
@@ -153,7 +162,8 @@ _DERIVE = {
 def trim(kind: KindSpec, obj: dict, rules: Rules | None = None) -> Trimmed:
     """Reduce a Kubernetes object to the fields we store.
 
-    `rules` is accepted for later tasks; annotations and addresses stay empty here.
+    Annotations need `rules` and a kind with `annotations: true`. Addresses are
+    filled for kinds with `addresses: true` and for nodes.
     """
     meta = obj.get("metadata") or {}
     data = {}
@@ -175,6 +185,10 @@ def trim(kind: KindSpec, obj: dict, rules: Rules | None = None) -> Trimmed:
         labels=labels,
         images=_images(obj),
     )
+    if kind.annotations and rules is not None:
+        t.annotations = filter_annotations(meta.get("annotations") or {}, rules)
+    if kind.addresses or kind.name == "nodes":
+        t.addresses = extract_addresses(kind.name, obj)
     payload = [t.data, t.labels, t.annotations, t.images, [astuple(a) for a in t.addresses]]
     t.hash = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
     return t

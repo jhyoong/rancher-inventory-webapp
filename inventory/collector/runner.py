@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 
 from inventory.collector.cluster import collect_cluster
 from inventory.collector.kinds import KindSpec, load_kinds
+from inventory.collector.rules import Rules, load_rules
 from inventory.db.connection import connect
 from inventory.db.repo import mark_cluster_failed, transaction
 from inventory.rancher.client import RancherClient
@@ -202,6 +203,7 @@ async def _execute(settings: Settings, conn: sqlite3.Connection, run_id: int, sh
         raise ValueError(f"run {run_id} not found")
     scope = Scope.from_json(row[0])
     kinds = load_kinds(settings)
+    rules = load_rules(settings)
     sites = [s for s in load_sites(settings) if scope.includes_site(s.name)]
 
     def cancelled() -> bool:
@@ -250,7 +252,7 @@ async def _execute(settings: Settings, conn: sqlite3.Connection, run_id: int, sh
             async with sems[site.name]:
                 client, token = clients[site.name]
                 return await _run_cluster(
-                    conn, run_id, site.name, cluster, client, token, kinds, settings,
+                    conn, run_id, site.name, cluster, client, token, kinds, rules, settings,
                     cancelled, should_stop,
                 )  # fmt: skip
 
@@ -269,6 +271,7 @@ async def _run_cluster(
     client: RancherClient,
     token: str,
     kinds: dict[str, KindSpec],
+    rules: Rules,
     settings: Settings,
     cancelled: Callable[[], bool],
     should_stop: Callable[[], bool],
@@ -293,7 +296,7 @@ async def _run_cluster(
 
     try:
         r = await collect_cluster(
-            client, conn, site, cluster, run_id, kinds, None, on_progress, should_stop,
+            client, conn, site, cluster, run_id, kinds, rules, on_progress, should_stop,
             retention_days=settings.metrics_retention_days,
         )  # fmt: skip
         status, total, done, objects, error = r.status, r.kinds_total, r.kinds_done, r.objects, r.error

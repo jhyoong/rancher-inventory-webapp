@@ -1,0 +1,42 @@
+annotations:
+  max_value_chars: 256
+  system_domains:            # annotations under these are not "custom"
+    - kubernetes.io
+    - k8s.io
+    - cattle.io
+    - helm.sh
+    - rke.cattle.io
+    - projectcalico.org
+  keep:                      # system annotations stored anyway
+    - field.cattle.io/projectId
+    - meta.helm.sh/release-name
+    - meta.helm.sh/release-namespace
+    - metallb.universe.tf
+    - kube-vip.io
+    - nginx.ingress.kubernetes.io
+    - cert-manager.io
+    - kubernetes.io/ingress.class
+  drop:                      # never stored
+    - kubectl.kubernetes.io/last-applied-configuration
+
+system_namespaces:
+  - "kube-*"
+  - "cattle-*"
+  - "fleet-*"
+  - local
+  - longhorn-system
+  - calico-system
+  - tigera-operator
+  - ingress-nginx
+  - cert-manager
+  - metallb-system
+
+system_crd_groups:
+  - "*.cattle.io"
+  - "*.k8s.io"
+  - projectcalico.org
+  - cilium.io
+  - monitoring.coreos.com
+  - longhorn.io
+  - metallb.io
+  - cert-manager.io
