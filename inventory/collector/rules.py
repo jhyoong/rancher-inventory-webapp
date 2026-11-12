@@ -16,6 +16,7 @@ class Rules:
     system_crd_groups: list[str] = field(default_factory=list)
     rancher_generated: dict[str, list[str]] = field(default_factory=dict)
     platform_roles: dict = field(default_factory=dict)
+    complexity: dict[str, int] = field(default_factory=dict)
 
 
 def _read_yaml(path: Path) -> dict:
@@ -71,7 +72,16 @@ def load_rules(settings) -> Rules:
             out[key] = bool(item) if key in flags else strings(item, f"{name}.{key}")
         return out
 
+    complexity = data.get("complexity") or {}
+    if not isinstance(complexity, dict):
+        raise ConfigError(f"complexity must be a mapping in {path}")
+    try:
+        complexity = {k: int(v) for k, v in complexity.items()}
+    except (TypeError, ValueError):
+        raise ConfigError(f"complexity values must be numbers in {path}") from None
+
     return Rules(
+        complexity=complexity,
         rancher_generated=string_map(data.get("rancher_generated"), "rancher_generated"),
         platform_roles=string_map(data.get("platform_roles"), "platform_roles", ("helm_in_system_namespace",)),
         max_value_chars=max_chars,

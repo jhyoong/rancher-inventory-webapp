@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Platform - Rancher inventory{% endblock %}
+{% block content %}
+<h1>Platform</h1>
+<h2>Admission webhooks</h2>
+<table>
+  <tr><th>Site</th><th>Cluster</th><th>Type</th><th>Name</th><th>Webhooks</th><th>Failure policies</th>
+      <th>Service namespaces</th><th>URL based</th><th>Intercepts all</th><th>Timeouts</th><th>Namespace selector</th>
+      <th>Helm release</th><th>Rancher</th></tr>
+  {% for w in webhooks %}
+  <tr><td>{{ w.site }}</td><td><a href="/clusters/{{ w.site }}/{{ w.cluster_id }}">{{ w.cluster }}</a></td><td>{{ w.type }}</td>
+      <td>{{ w.name }}</td><td class="r">{{ w.webhooks }}</td><td>{{ w.failure_policies | join(", ") }}</td>
+      <td>{{ w.service_namespaces | join(", ") }}</td><td>{{ "yes" if w.url_based else "" }}</td>
+      <td>{% if w.intercepts_all %}<span class="warn">yes</span>{% endif %}</td>
+      <td>{{ w.timeouts | join(", ") }}</td><td>{{ "yes" if w.has_namespace_selector else "" }}</td>
+      <td>{{ w.helm_release or "" }}</td><td>{{ "yes" if w.rancher_generated else "" }}</td></tr>
+  {% else %}
+  <tr><td colspan="13">None.</td></tr>
+  {% endfor %}
+</table>
+<h2>Aggregated APIServices</h2>
+<table>
+  <tr><th>Site</th><th>Cluster</th><th>Name</th><th>Service namespace</th><th>Available</th></tr>
+  {% for a in apiservices %}
+  <tr><td>{{ a.site }}</td><td><a href="/clusters/{{ a.site }}/{{ a.cluster_id }}">{{ a.cluster }}</a></td><td>{{ a.name }}</td>
+      <td>{{ a.service_namespace or "" }}</td><td>{% if a.available %}yes{% else %}<span class="warn">no</span>{% endif %}</td></tr>
+  {% else %}
+  <tr><td colspan="5">None.</td></tr>
+  {% endfor %}
+</table>
+<h2>Custom ClusterRoles</h2>
+<p class="muted">Not created by Rancher, Kubernetes or a platform component (rules.yaml rancher_generated and platform_roles).</p>
+<table>
+  <tr><th>Site</th><th>Cluster</th><th>Name</th><th>Rules</th><th>Aggregated</th><th>Helm managed</th></tr>
+  {% for r in roles %}
+  <tr><td>{{ r.site }}</td><td><a href="/clusters/{{ r.site }}/{{ r.cluster_id }}">{{ r.cluster }}</a></td><td>{{ r.name }}</td>
+      <td class="r">{{ r.rule_count }}</td><td>{{ "yes" if r.aggregated else "" }}</td><td>{{ "yes" if r.helm_managed else "" }}</td></tr>
+  {% else %}
+  <tr><td colspan="6">None.</td></tr>
+  {% endfor %}
+</table>
+<h2>Non-system cluster-admin bindings</h2>
+<table>
+  <tr><th>Site</th><th>Cluster</th><th>Binding</th><th>Subjects</th></tr>
+  {% for b in admin_bindings %}
+  <tr><td>{{ b.site }}</td><td><a href="/clusters/{{ b.site }}/{{ b.cluster_id }}">{{ b.cluster }}</a></td><td>{{ b.name }}</td><td>{{ b.subjects }}</td></tr>
+  {% else %}
+  <tr><td colspan="4">None.</td></tr>
+  {% endfor %}
+</table>
+<h2>API versions</h2>
+<table>
+  <tr><th>Group version</th><th>Source</th><th>Kinds (in use)</th><th>Clusters</th></tr>
+  {% for v in api_versions %}
+  <tr><td>{{ v.group_version }}</td><td>{{ "served" if v.source == "served" else "in use" }}</td>
+      <td>{{ v.kinds or "" }}</td><td class="r">{{ v.clusters }}</td></tr>
+  {% else %}
+  <tr><td colspan="4">None.</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}

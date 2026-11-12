@@ -3,7 +3,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
 
-from inventory.collector.rollup import build_namespace_rollup
+from inventory.collector.rollup import build_namespace_rollup, complexity_flags
 from inventory.collector.rules import Rules
 from inventory.collector.units import parse_bytes
 from inventory.db.repo import transaction
@@ -208,4 +208,8 @@ def build_profiles(
                 total("ingresses"), run_id, site, cluster_id,
             ),
         )  # fmt: skip
+        conn.execute(
+            "UPDATE cluster_profile SET complexity_flags=? " + where,
+            (json.dumps(complexity_flags(conn, site, cluster_id, rules)), *args),
+        )
     return flags

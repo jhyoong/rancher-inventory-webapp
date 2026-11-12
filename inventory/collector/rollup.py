@@ -1,7 +1,9 @@
 """Namespace roll-up of spec 6.9, with the same counting rules as k8s-discovery.sh."""
 
+import re
 from collections import defaultdict
 
+from inventory.collector.rules import Rules
 from inventory.db.repo import transaction
 
 ROLLUP_COLUMNS = (
@@ -84,3 +86,71 @@ def build_namespace_rollup(conn, site: str, cluster_id: str) -> None:
             f"UPDATE namespace_profile SET {sets} WHERE site=? AND cluster_id=? AND namespace=?",
             [(*(ns[n][c] for c in ROLLUP_COLUMNS), site, cluster_id, n) for n in names],
         )
+
+
+# ---- complexity flags (spec 6.14) ----
+
+COMPLEXITY_FLAGS = (
+    "k8s<1.32", "stateful", "rwx", "nginx-snippets", "many-crds", "deprecated-apis",
+    "privileged/hostpath", "gpu", "operators", "intercept-all-webhooks",
+)  # fmt: skip
+
+BUILTIN_OWNER_KINDS = ("ReplicaSet", "Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob", "ReplicationController")
+
+
+def k8s_minor(version: str | None) -> int | None:
+    """Minor version from a gitVersion such as "v1.34.3+rke2r1"."""
+    m = re.match(r"v?\d+\.(\d+)", version or "")
+    return int(m.group(1)) if m else None
+
+
+def complexity_flags(conn, site: str, cluster_id: str, rules: Rules) -> list[str]:
+    """Flags in COMPLEXITY_FLAGS order. many-crds and deprecated-apis need their opt-in collectors."""
+    args = (site, cluster_id)
+
+    def any_row(sql: str) -> bool:
+        return conn.execute(sql + " LIMIT 1", args).fetchone() is not None
+
+    user_ns = (
+        "r.namespace IN (SELECT namespace FROM namespace_profile p"
+        " WHERE p.site = r.site AND p.cluster_id = r.cluster_id AND p.is_system = 0)"
+    )
+    workloads = "r.kind IN ('deployments','statefulsets','daemonsets','jobs','cronjobs','replicationcontrollers')"
+    base = "SELECT 1 FROM resources r WHERE r.site=? AND r.cluster_id=?"
+    version = conn.execute("SELECT k8s_version FROM clusters WHERE site=? AND cluster_id=?", args).fetchone()
+    minor = k8s_minor(version[0] if version else None)
+    min_minor = int(rules.complexity.get("min_k8s_minor", 32))
+    crds_in_use = conn.execute(
+        "SELECT count(*) FROM optional_results WHERE site=? AND cluster_id=? AND collector='cr_counts'"
+        " AND CAST(value AS INTEGER) > 0",
+        args,
+    ).fetchone()[0]
+    owners = ", ".join(f"'{k}'" for k in BUILTIN_OWNER_KINDS)  # fixed names above
+    found = {
+        "k8s<1.32": minor is not None and minor < min_minor,
+        "stateful": any_row(f"{base} AND {user_ns} AND r.kind IN ('statefulsets', 'persistentvolumeclaims')"),
+        "rwx": any_row(f"{base} AND r.kind='persistentvolumeclaims' AND EXISTS "
+                       "(SELECT 1 FROM json_each(r.data, '$.access_modes') WHERE value='ReadWriteMany')"),
+        "nginx-snippets": any_row(f"{base} AND r.kind='ingresses' AND json_extract(r.data, '$.has_snippet') = 1"),
+        "many-crds": crds_in_use > int(rules.complexity.get("many_crds", 30)),
+        "deprecated-apis": any_row(
+            "SELECT 1 FROM optional_results WHERE site=? AND cluster_id=? AND collector='deprecated_api_metrics'"
+            " AND CAST(value AS INTEGER) > 0"
+        ),
+        "privileged/hostpath": any_row(
+            f"{base} AND {workloads} AND {user_ns} AND (json_extract(r.data, '$.privileged') > 0"
+            " OR json_extract(r.data, '$.hostpath') > 0)"
+        ),
+        "gpu": any_row(
+            f"{base} AND r.kind='nodes' AND (CAST(json_extract(r.data, '$.status.capacity.\"nvidia.com/gpu\"') AS INTEGER) > 0"
+            " OR CAST(json_extract(r.data, '$.status.capacity.\"amd.com/gpu\"') AS INTEGER) > 0)"
+        ),
+        "operators": any_row(
+            f"{base} AND {workloads} AND {user_ns} AND json_extract(r.data, '$.owner_kind') NOT IN ({owners})"
+        ),
+        "intercept-all-webhooks": any_row(
+            f"{base} AND r.kind IN ('mutatingwebhookconfigurations', 'validatingwebhookconfigurations')"
+            " AND json_extract(r.data, '$.intercepts_all') = 1"
+        ),
+    }  # fmt: skip
+    return [f for f in COMPLEXITY_FLAGS if found[f]]

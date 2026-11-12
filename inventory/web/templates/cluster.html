@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_class_badge.html" import class_badge, flag_badges, state %}
+{% from "_class_badge.html" import class_badge, complexity_badges, flag_badges, state %}
 {% block title %}{{ c.name }} - Rancher inventory{% endblock %}
 {% block content %}
 <h1>{{ c.name }} <span class="muted">({{ c.site }} / {{ c.cluster_id }})</span></h1>
@@ -25,7 +25,7 @@
 
 <h2>Profile</h2>
 {% if p and p.class %}
-<p>{{ class_badge(p.class) }} {{ flag_badges(p) }} {{ state(p, user.role == "admin") }}</p>
+<p>{{ class_badge(p.class) }} {{ flag_badges(p) }} {{ complexity_badges(p) }} {{ state(p, user.role == "admin") }}</p>
 <table class="facts">
   <tr><th>StatefulSets (user namespaces)</th><td>{{ p.statefulsets }}</td></tr>
   <tr><th>Bound PVCs (user namespaces)</th><td>{{ p.pvc_bound }} ({{ p.pvc_bytes | size }})</td></tr>

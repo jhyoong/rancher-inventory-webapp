@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_class_badge.html" import class_badge, flag_badges, state %}
+{% from "_class_badge.html" import class_badge, complexity_badges, flag_badges, state %}
 {% block title %}Inventory - Rancher inventory{% endblock %}
 {% block content %}
 <h1>Inventory</h1>
@@ -16,7 +16,7 @@
 <table>
   <tr><th>Site</th><th>Cluster</th><th>Class</th><th>Flags</th><th>Kubernetes</th><th>Nodes</th><th>StatefulSets</th>
       <th>Bound PVCs</th><th>Capacity</th><th>Helm releases</th><th>Custom CRD groups</th><th>LB services</th>
-      <th>Ingresses</th><th>CNI</th><th>CIDRs</th></tr>
+      <th>Ingresses</th><th>CNI</th><th>CIDRs</th><th>Complexity</th></tr>
   {% for r in rows %}
   <tr>
     <td>{{ r.site }}</td>
@@ -34,9 +34,10 @@
     <td class="r">{{ r.ingresses if r.ingresses is not none else "-" }}</td>
     <td>{{ r.cni }}</td>
     <td>{{ r.cidrs }}</td>
+    <td>{{ complexity_badges(r) }}</td>
   </tr>
   {% else %}
-  <tr><td colspan="15">No clusters match.</td></tr>
+  <tr><td colspan="16">No clusters match.</td></tr>
   {% endfor %}
 </table>
 {% endblock %}

@@ -1,8 +1,10 @@
 """Read queries shared by the web pages."""
 
+import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
+from inventory.collector.rollup import COMPLEXITY_FLAGS
 from inventory.collector.runner import last_good_run
 from inventory.settings import Settings
 
@@ -197,7 +199,6 @@ def get_preset(conn: sqlite3.Connection, preset_id: int) -> sqlite3.Row | None:
 
 def check_preset(conn: sqlite3.Connection, preset_id: int) -> list[dict]:
     """One row per cluster: present, absent or unknown."""
-    import json
 
     preset = get_preset(conn, preset_id)
     if preset is None:
@@ -246,7 +247,7 @@ _INVENTORY_SQL = """
 SELECT c.site, c.cluster_id, c.name, c.k8s_version, c.node_count, c.last_ok_at, c.labels,
        p.class, p.stateful, p.helm, p.custom_crds, p.hostpath,
        p.statefulsets, p.pvc_bound, p.pvc_bytes, p.helm_releases, p.crd_groups,
-       p.lb_services, p.ingresses, p.network, p.updated_run,
+       p.lb_services, p.ingresses, p.network, p.updated_run, p.complexity_flags,
        (SELECT rc.status FROM run_clusters rc WHERE rc.site = c.site AND rc.cluster_id = c.cluster_id
         AND rc.status IN ('ok', 'failed') ORDER BY rc.run_id DESC LIMIT 1) AS latest_status,
        (SELECT rc.error FROM run_clusters rc WHERE rc.site = c.site AND rc.cluster_id = c.cluster_id
@@ -257,10 +258,10 @@ LEFT JOIN cluster_profile p ON p.site = c.site AND p.cluster_id = c.cluster_id
 
 
 def _decode_profile(d: dict) -> dict:
-    import json
 
     groups = json.loads(d["crd_groups"]) if d.get("crd_groups") else []
     net = json.loads(d["network"]) if d.get("network") else {}
+    d["complexity"] = json.loads(d["complexity_flags"]) if d.get("complexity_flags") else []
     d["crd_group_list"] = groups
     d["crd_group_count"] = len(groups)
     d["cni"] = net.get("cni") or ""
@@ -279,9 +280,13 @@ def inventory_rows(conn, site=None, cls=None, flag=None, label=None) -> list[dic
         parts.append("p.class = :cls")
         params["cls"] = cls
     if flag:
-        if flag not in FLAG_COLUMNS:
+        if flag in FLAG_COLUMNS:
+            parts.append(f"{FLAG_COLUMNS[flag]} = 1")  # column comes from the fixed map above
+        elif flag in COMPLEXITY_FLAGS:
+            parts.append("EXISTS (SELECT 1 FROM json_each(coalesce(p.complexity_flags, '[]')) WHERE value = :flag)")
+            params["flag"] = flag
+        else:
             raise ValueError(f"unknown flag: {flag}")
-        parts.append(f"{FLAG_COLUMNS[flag]} = 1")  # column comes from the fixed map above
     if label:
         lkey, sep, lvalue = label.partition("=")
         cond = "key = :label_key"
@@ -303,7 +308,7 @@ def inventory_filter_options(conn) -> dict:
     return {
         "sites": [r[0] for r in conn.execute("SELECT DISTINCT site FROM clusters ORDER BY site")],
         "classes": [r[0] for r in conn.execute("SELECT DISTINCT class FROM cluster_profile ORDER BY class")],
-        "flags": list(FLAG_COLUMNS),
+        "flags": list(FLAG_COLUMNS) + [f for f in COMPLEXITY_FLAGS if f not in FLAG_COLUMNS],
     }
 
 
@@ -728,3 +733,94 @@ def namespace_rollup(conn, sort: str = "", limit: int = PAGE_LIMIT) -> list[dict
         (limit,),
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+# ---- platform page (spec 6.11) ----
+
+
+def _json_rows(conn, sql: str, params=()) -> list[dict]:
+    return [dict(r) for r in conn.execute(sql, params).fetchall()]
+
+
+def webhooks(conn, limit: int = PAGE_LIMIT) -> list[dict]:
+    rows = _json_rows(
+        conn,
+        """SELECT r.site, c.name AS cluster, r.cluster_id, r.kind, r.name, r.data
+           FROM resources r JOIN clusters c ON c.site = r.site AND c.cluster_id = r.cluster_id
+           WHERE r.kind IN ('mutatingwebhookconfigurations', 'validatingwebhookconfigurations')
+           ORDER BY r.site, c.name, r.kind, r.name LIMIT ?""",
+        (limit,),
+    )
+    for r in rows:
+        r.update(json.loads(r.pop("data")))
+        r["type"] = "mutating" if r["kind"].startswith("mutating") else "validating"
+    return rows
+
+
+def apiservices(conn, limit: int = PAGE_LIMIT) -> list[dict]:
+    return _json_rows(
+        conn,
+        """SELECT r.site, c.name AS cluster, r.cluster_id, r.name,
+                  json_extract(r.data, '$.service_namespace') AS service_namespace,
+                  json_extract(r.data, '$.available') AS available
+           FROM resources r JOIN clusters c ON c.site = r.site AND c.cluster_id = r.cluster_id
+           WHERE r.kind = 'apiservices' ORDER BY r.site, c.name, r.name LIMIT ?""",
+        (limit,),
+    )
+
+
+def custom_clusterroles(conn, limit: int = PAGE_LIMIT) -> list[dict]:
+    """ClusterRoles that are neither Rancher-generated nor Kubernetes or platform roles."""
+    return _json_rows(
+        conn,
+        """SELECT r.site, c.name AS cluster, r.cluster_id, r.name,
+                  json_extract(r.data, '$.rule_count') AS rule_count,
+                  json_extract(r.data, '$.aggregated') AS aggregated,
+                  json_extract(r.data, '$.helm_managed') AS helm_managed
+           FROM resources r JOIN clusters c ON c.site = r.site AND c.cluster_id = r.cluster_id
+           WHERE r.kind = 'clusterroles' AND json_extract(r.data, '$.rancher_generated') = 0
+             AND json_extract(r.data, '$.platform') = 0
+           ORDER BY r.site, c.name, r.name LIMIT ?""",
+        (limit,),
+    )
+
+
+def is_system_binding(name: str, namespace: str, role: str, subjects: list) -> bool:
+    """The script's rule for system bindings."""
+    return (
+        name.startswith("system:")
+        or role.startswith("system:")
+        or (name == "cluster-admin" and subjects == [["Group", "system:masters"]])
+        or namespace.startswith("kube-")
+    )
+
+
+def cluster_admin_bindings(conn) -> list[dict]:
+    """ClusterRoleBindings to cluster-admin that are not system and not Rancher-generated."""
+    rows = _json_rows(
+        conn,
+        """SELECT r.site, c.name AS cluster, r.cluster_id, r.namespace, r.name, r.data
+           FROM resources r JOIN clusters c ON c.site = r.site AND c.cluster_id = r.cluster_id
+           WHERE r.kind = 'clusterrolebindings' AND json_extract(r.data, '$.role[1]') = 'cluster-admin'
+             AND json_extract(r.data, '$.rancher_generated') = 0
+           ORDER BY r.site, c.name, r.name""",
+    )
+    out = []
+    for r in rows:
+        d = json.loads(r.pop("data"))
+        if is_system_binding(r["name"], r["namespace"], d["role"][1] or "", d["subjects"]):
+            continue
+        r["subjects"] = ", ".join(f"{k}={n}" for k, n in d["subjects"])
+        out.append(r)
+    return out
+
+
+def api_version_spread(conn) -> list[dict]:
+    """Group versions served and in use, with the number of clusters for each."""
+    return _json_rows(
+        conn,
+        """SELECT a.group_version, a.source, group_concat(DISTINCT a.kind) AS kinds,
+                  COUNT(DISTINCT a.site || '/' || a.cluster_id) AS clusters
+           FROM api_versions a JOIN clusters c ON c.site = a.site AND c.cluster_id = a.cluster_id
+           GROUP BY a.group_version, a.source ORDER BY a.source DESC, a.group_version""",
+    )
