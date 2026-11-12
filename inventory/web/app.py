@@ -25,10 +25,13 @@ from inventory.web.routes import (
     helm,
     home,
     inventory,
+    namespaces,
     network,
     presets,
     query,
     runs,
+    storage,
+    workloads,
 )
 
 log = logging.getLogger("inventory.web")
@@ -107,7 +110,8 @@ def create_app(settings: Settings, collector: CollectorThread | None) -> FastAPI
     app.state.collector = collector
     app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
     for module in (
-        auth, home, clusters, inventory, network, helm, crds, annotations, runs, query, presets, check, admin, health
+        auth, home, clusters, inventory, network, helm, crds, annotations, workloads, storage, namespaces,
+        runs, query, presets, check, admin, health,
     ):
         app.include_router(module.router)
     return app

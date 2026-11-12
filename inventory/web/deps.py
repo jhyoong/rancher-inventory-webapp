@@ -66,6 +66,11 @@ def set_session_cookie(resp, token: str, settings: Settings) -> None:
     )
 
 
+def flag_params(request: Request, allowed) -> list[str]:
+    """Names from `allowed` that are set (non-empty) in the query string."""
+    return [f for f in allowed if request.query_params.get(f)]
+
+
 def get_settings(request: Request) -> Settings:
     return request.app.state.settings
 

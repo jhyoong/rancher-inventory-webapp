@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Workloads - Rancher inventory{% endblock %}
+{% block content %}
+<h1>Workloads</h1>
+<form method="get" action="/workloads">
+  {% for f in all_flags %}<label><input type="checkbox" name="{{ f }}" value="1" {% if f in flags %}checked{% endif %}> {{ f | replace("_", " ") }}</label> {% endfor %}
+  <label>Name <input name="name" value="{{ name_filter }}"></label>
+  <button type="submit">Filter</button>
+</form>
+{% if rows | length >= max_rows %}<p class="warn">Showing the first {{ max_rows }} rows. Add filters to narrow the result.</p>{% endif %}
+<table>
+  <tr><th>Site</th><th>Cluster</th><th>Kind</th><th>Namespace</th><th>Name</th><th>Ready</th><th>Containers</th>
+      <th>CPU req / lim (cores)</th><th>Memory req / lim (GiB)</th><th>GPU</th><th>Owner</th><th>Warnings</th></tr>
+  {% for r in rows %}
+  <tr class="row">
+    <td>{{ r.site }}</td><td><a href="/clusters/{{ r.site }}/{{ r.cluster_id }}">{{ r.cluster }}</a></td>
+    <td>{{ r.kind }}</td><td>{{ r.namespace }}</td><td>{{ r.name }}</td>
+    <td class="r">{% if r.desired is not none %}{{ r.ready or 0 }} / {{ r.desired }}{% else %}-{% endif %}</td>
+    <td class="r">{{ r.containers }}</td>
+    <td class="r">{{ r.cpu_req_m | cores }} / {{ r.cpu_lim_m | cores }}</td>
+    <td class="r">{{ r.mem_req_b | gib }} / {{ r.mem_lim_b | gib }}</td>
+    <td class="r">{{ r.gpu or "" }}</td>
+    <td>{% if r.owner_kind %}{{ r.owner_api_version }}/{{ r.owner_kind }}{% endif %}</td>
+    <td>{% if r.privileged %}<span class="badge hostpath">privileged</span>{% endif %}{% if r.host_network %}<span class="badge hostpath">hostNetwork</span>{% endif %}{% if r.hostpath %}<span class="badge hostpath">hostPath</span>{% endif %}{% if r.no_requests %}<span class="badge">no requests</span>{% endif %}{% if r.no_limits %}<span class="badge">no limits</span>{% endif %}{% if r.no_probes %}<span class="badge">no probes</span>{% endif %}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="12">No workloads match.</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}

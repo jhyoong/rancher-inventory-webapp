@@ -568,3 +568,163 @@ def cluster_crd_groups(conn, site: str, cluster_id: str, rules) -> list[dict]:
         for r in rows
         if r["grp"] and not is_system_crd_group(r["grp"], rules)
     ]
+
+
+# ---- workloads, storage and namespaces pages (spec 7, discovery fields) ----
+
+PAGE_LIMIT = 5000  # rows per discovery page list, like the /query cap
+
+_BUILTIN_OWNERS = "('ReplicaSet', 'Deployment', 'StatefulSet', 'DaemonSet', 'Job', 'CronJob', 'ReplicationController')"
+
+WORKLOAD_FILTERS = {
+    "privileged": "json_extract(r.data, '$.privileged') > 0",
+    "host_network": "json_extract(r.data, '$.host_network') = 1",
+    "hostpath": "json_extract(r.data, '$.hostpath') > 0",
+    "no_requests": "json_extract(r.data, '$.no_requests') > 0",
+    "no_limits": "json_extract(r.data, '$.no_limits') > 0",
+    "no_probes": "json_extract(r.data, '$.no_probes') > 0",
+    "operator_owned": f"json_extract(r.data, '$.owner_kind') NOT IN {_BUILTIN_OWNERS}",
+    "gpu": "json_extract(r.data, '$.gpu') > 0",
+}
+
+_READY = """CASE r.kind
+    WHEN 'daemonsets' THEN json_extract(r.data, '$.status.numberReady')
+    WHEN 'jobs' THEN json_extract(r.data, '$.status.active')
+    WHEN 'cronjobs' THEN NULL
+    ELSE json_extract(r.data, '$.status.readyReplicas') END"""
+_DESIRED = """CASE r.kind
+    WHEN 'daemonsets' THEN json_extract(r.data, '$.status.desiredNumberScheduled')
+    WHEN 'jobs' THEN json_extract(r.data, '$.spec.parallelism')
+    WHEN 'cronjobs' THEN NULL
+    ELSE json_extract(r.data, '$.spec.replicas') END"""
+
+
+def workloads(conn, flags: list[str], name: str = "", limit: int = PAGE_LIMIT) -> list[dict]:
+    """Workloads of every podspec kind. flags are keys of WORKLOAD_FILTERS, all must hold."""
+    bad = set(flags) - set(WORKLOAD_FILTERS)
+    if bad:
+        raise ValueError(f"unknown filter: {', '.join(sorted(bad))}")
+    parts = ["r.kind IN ('deployments', 'statefulsets', 'daemonsets', 'jobs', 'cronjobs', 'replicationcontrollers')"]
+    parts += [WORKLOAD_FILTERS[f] for f in flags]  # SQL comes from the fixed map above
+    params: dict = {"limit": limit}
+    if name:
+        parts.append("r.name LIKE '%' || :name || '%' ESCAPE '\\'")
+        params["name"] = _like_escape(name)
+    rows = conn.execute(
+        f"""SELECT r.site, c.name AS cluster, r.cluster_id, r.kind, r.namespace, r.name,
+                   {_READY} AS ready, {_DESIRED} AS desired,
+                   json_extract(r.data, '$.containers') AS containers,
+                   json_extract(r.data, '$.cpu_req_m') AS cpu_req_m, json_extract(r.data, '$.mem_req_b') AS mem_req_b,
+                   json_extract(r.data, '$.cpu_lim_m') AS cpu_lim_m, json_extract(r.data, '$.mem_lim_b') AS mem_lim_b,
+                   json_extract(r.data, '$.gpu') AS gpu, json_extract(r.data, '$.privileged') AS privileged,
+                   json_extract(r.data, '$.host_network') AS host_network,
+                   json_extract(r.data, '$.hostpath') AS hostpath,
+                   json_extract(r.data, '$.no_requests') AS no_requests,
+                   json_extract(r.data, '$.no_limits') AS no_limits,
+                   json_extract(r.data, '$.no_probes') AS no_probes,
+                   json_extract(r.data, '$.owner_kind') AS owner_kind,
+                   json_extract(r.data, '$.owner_api_version') AS owner_api_version
+            FROM resources r JOIN clusters c ON c.site = r.site AND c.cluster_id = r.cluster_id
+            WHERE {" AND ".join(parts)}
+            ORDER BY r.site, c.name, r.namespace, r.kind, r.name LIMIT :limit""",
+        params,
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+STORAGE_FLAGS = {
+    "rwx": "EXISTS (SELECT 1 FROM json_each(r.data, '$.access_modes') WHERE value = 'ReadWriteMany')",
+    "block": "json_extract(r.data, '$.volume_mode') = 'Block'",
+    "unmounted": "json_extract(r.data, '$.mounted') = 0",
+}
+
+
+def pvcs(conn, flags: list[str], source: str = "", storage_class: str = "", limit: int = PAGE_LIMIT) -> list[dict]:
+    bad = set(flags) - set(STORAGE_FLAGS)
+    if bad:
+        raise ValueError(f"unknown filter: {', '.join(sorted(bad))}")
+    parts = ["r.kind = 'persistentvolumeclaims'"] + [STORAGE_FLAGS[f] for f in flags]
+    params: dict = {"limit": limit}
+    if source:
+        parts.append("json_extract(pv.data, '$.source') = :source")
+        params["source"] = source
+    if storage_class:
+        parts.append("json_extract(r.data, '$.spec.storageClassName') = :storage_class")
+        params["storage_class"] = storage_class
+    rows = conn.execute(
+        f"""SELECT r.site, c.name AS cluster, r.cluster_id, r.namespace, r.name,
+                   json_extract(r.data, '$.spec.storageClassName') AS storage_class,
+                   (SELECT group_concat(value, ',') FROM json_each(r.data, '$.access_modes')) AS access_modes,
+                   json_extract(r.data, '$.volume_mode') AS volume_mode,
+                   json_extract(r.data, '$.spec.resources.requests.storage') AS requested,
+                   json_extract(r.data, '$.status.capacity.storage') AS capacity,
+                   json_extract(r.data, '$.status.phase') AS phase,
+                   json_extract(r.data, '$.mounted') AS mounted,
+                   (SELECT group_concat(value, ',') FROM json_each(r.data, '$.used_by')) AS used_by,
+                   json_extract(pv.data, '$.source') AS source
+            FROM resources r
+            JOIN clusters c ON c.site = r.site AND c.cluster_id = r.cluster_id
+            LEFT JOIN resources pv ON pv.site = r.site AND pv.cluster_id = r.cluster_id
+                 AND pv.kind = 'persistentvolumes' AND pv.namespace = ''
+                 AND pv.name = json_extract(r.data, '$.volume_name')
+            WHERE {" AND ".join(parts)}
+            ORDER BY r.site, c.name, r.namespace, r.name LIMIT :limit""",
+        params,
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def pvs(conn, limit: int = PAGE_LIMIT) -> list[dict]:
+    rows = conn.execute(
+        """SELECT r.site, c.name AS cluster, r.cluster_id, r.name,
+                  json_extract(r.data, '$.spec.capacity.storage') AS capacity,
+                  json_extract(r.data, '$.spec.storageClassName') AS storage_class,
+                  json_extract(r.data, '$.source') AS source, json_extract(r.data, '$.pinned') AS pinned,
+                  json_extract(r.data, '$.reclaim') AS reclaim, json_extract(r.data, '$.status.phase') AS phase,
+                  json_extract(r.data, '$.spec.claimRef.namespace') AS claim_namespace,
+                  json_extract(r.data, '$.spec.claimRef.name') AS claim_name
+           FROM resources r JOIN clusters c ON c.site = r.site AND c.cluster_id = r.cluster_id
+           WHERE r.kind = 'persistentvolumes' ORDER BY r.site, c.name, r.name LIMIT ?""",
+        (limit,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def storage_options(conn) -> dict:
+    return {
+        "sources": [r[0] for r in conn.execute(
+            "SELECT DISTINCT json_extract(data, '$.source') AS s FROM resources"
+            " WHERE kind='persistentvolumes' AND s IS NOT NULL ORDER BY s")],
+        "storage_classes": [r[0] for r in conn.execute(
+            "SELECT DISTINCT json_extract(data, '$.spec.storageClassName') AS s FROM resources"
+            " WHERE kind='persistentvolumeclaims' AND s IS NOT NULL ORDER BY s")],
+    }  # fmt: skip
+
+
+def snapshot_counts(conn) -> list[dict]:
+    """Per cluster: volume snapshot count, or None when snapshots are not installed or not listed."""
+    rows = conn.execute(
+        """SELECT c.site, c.name AS cluster, c.cluster_id,
+                  (SELECT rk.status FROM run_kinds rk WHERE rk.site = c.site AND rk.cluster_id = c.cluster_id
+                   AND rk.kind = 'volumesnapshots' ORDER BY rk.run_id DESC LIMIT 1) AS status,
+                  (SELECT count(*) FROM resources r WHERE r.site = c.site AND r.cluster_id = c.cluster_id
+                   AND r.kind = 'volumesnapshots') AS snapshots
+           FROM clusters c ORDER BY c.site, c.name"""
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+NAMESPACE_SORTS = ("cpu_req_m", "cpu_used_m", "mem_req_b", "mem_used_b", "restarts")
+
+
+def namespace_rollup(conn, sort: str = "", limit: int = PAGE_LIMIT) -> list[dict]:
+    if sort and sort not in NAMESPACE_SORTS:
+        raise ValueError(f"unknown sort: {sort}")
+    order = f"coalesce(p.{sort}, -1) DESC, " if sort else ""  # column comes from the fixed list above
+    rows = conn.execute(
+        f"""SELECT p.*, c.name AS cluster FROM namespace_profile p
+            JOIN clusters c ON c.site = p.site AND c.cluster_id = p.cluster_id
+            ORDER BY {order}p.site, c.name, p.namespace LIMIT ?""",
+        (limit,),
+    ).fetchall()
+    return [dict(r) for r in rows]

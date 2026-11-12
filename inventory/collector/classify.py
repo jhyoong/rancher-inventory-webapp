@@ -3,6 +3,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
 
+from inventory.collector.rollup import build_namespace_rollup
 from inventory.collector.rules import Rules
 from inventory.collector.units import parse_bytes
 from inventory.db.repo import transaction
@@ -187,6 +188,7 @@ def build_profiles(
                 for n in sorted(names)
             ],
         )  # fmt: skip
+        build_namespace_rollup(conn, site, cluster_id)
         for n, (cpu, mem) in (pod_usage or {}).items():
             conn.execute(
                 "UPDATE namespace_profile SET cpu_used_m=?, mem_used_b=? WHERE site=? AND cluster_id=? AND namespace=?",
