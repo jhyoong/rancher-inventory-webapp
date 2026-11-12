@@ -2,6 +2,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+from inventory.collector.classify import build_profiles
 from inventory.collector.kinds import KindSpec
 from inventory.collector.rules import Rules
 from inventory.collector.transform import trim
@@ -105,9 +106,12 @@ async def collect_cluster(
         metrics_from_cluster(cluster, usage), retention_days=retention_days,
     )  # fmt: skip
 
-    # Seam: when rules is not None, build_profiles(conn, site, cid) goes here (Task 12).
-
     error = None
+    if rules is not None and not stopped and not failed_kinds:
+        try:
+            build_profiles(conn, site, cid, run_id, rules)
+        except Exception as e:  # collected data stays; the cluster is marked failed
+            error = f"profile build failed: {e}"
     if stopped:
         error = "stopped"
     elif failed_kinds:
