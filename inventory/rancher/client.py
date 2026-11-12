@@ -1,3 +1,5 @@
+from urllib.parse import parse_qsl
+
 import httpx
 
 from inventory.settings import Site
@@ -56,11 +58,14 @@ class RancherClient:
         return (await self.get_json("/v3/clusters"))["data"]
 
     async def list_kind(self, cluster_id: str, path: str, page_size: int = 500) -> list[dict]:
-        url = f"/k8s/clusters/{cluster_id}{path}"
+        base, _, query = f"/k8s/clusters/{cluster_id}{path}".partition("?")
+        url = base
+        # httpx replaces a query string when params are given, so merge them here.
+        extra = dict(parse_qsl(query, keep_blank_values=True))
         items: list[dict] = []
         token = ""
         while True:
-            params: dict = {"limit": page_size}
+            params: dict = {**extra, "limit": page_size}
             if token:
                 params["continue"] = token
             data = await self.get_json(url, params)
