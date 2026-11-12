@@ -97,6 +97,11 @@ def _derive_node(obj: dict, data: dict) -> None:
     labels = (obj.get("metadata") or {}).get("labels") or {}
     data["roles"] = sorted(k[len(prefix):] for k in labels if k.startswith(prefix) and k[len(prefix):])
     data["provider"] = derive_node_provider((obj.get("spec") or {}).get("providerID") or "")
+    conds = (obj.get("status") or {}).get("conditions") or []
+    data["ready"] = next((c.get("status") for c in conds if isinstance(c, dict) and c.get("type") == "Ready"), None)
+    data["taints"] = [
+        f"{t.get('key')}:{t.get('effect')}" for t in (obj.get("spec") or {}).get("taints") or [] if isinstance(t, dict)
+    ]
 
 
 def _derive_statefulset(obj: dict, data: dict) -> None:

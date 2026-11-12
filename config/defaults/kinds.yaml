@@ -3,7 +3,10 @@ kinds:
     path: /api/v1/nodes
     scope: cluster
     keep: [status.addresses, spec.podCIDR, status.nodeInfo.kubeletVersion,
-           status.capacity, status.allocatable]
+           status.nodeInfo.osImage, status.nodeInfo.kernelVersion,
+           status.nodeInfo.containerRuntimeVersion, status.nodeInfo.architecture,
+           spec.unschedulable, status.capacity, status.allocatable]
+    # derived: roles, provider, ready, taints (key:effect only, never values)
 
   namespaces:
     path: /api/v1/namespaces

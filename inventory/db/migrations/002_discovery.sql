@@ -32,6 +32,7 @@ CREATE TABLE api_versions (
     group_version TEXT NOT NULL,
     source        TEXT NOT NULL,   -- served | in_use
     kind          TEXT NOT NULL DEFAULT '',
+    objects       INTEGER,         -- in_use: number of objects with this apiVersion and kind
     PRIMARY KEY (site, cluster_id, group_version, source, kind)
 );
 

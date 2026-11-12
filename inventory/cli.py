@@ -10,6 +10,11 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser("check-config")
     sub.add_parser("collect-once")
     sub.add_parser("healthcheck")
+    exp = sub.add_parser("export-discovery", help="anonymised discovery export (tar.gz)")
+    exp.add_argument("--out", required=True, help="folder for the tar.gz")
+    exp.add_argument("--site", help="only this site")
+    exp.add_argument("--cluster", action="append", default=[], help="cluster id or site/id (repeatable)")
+    exp.add_argument("--strict", action="store_true", help="also hash image, chart, CRD and StorageClass names")
     user = sub.add_parser("user")
     usub = user.add_subparsers(dest="user_command", required=True)
     for name in ("add", "passwd", "list", "disable"):
@@ -173,6 +178,49 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
 
+def _export_discovery(args) -> int:
+    from pathlib import Path
+
+    from inventory.collector.runner import Scope
+    from inventory.db.connection import connect
+    from inventory.db.migrate import migrate
+    from inventory.export.discovery import ExportBlocked, ExportOptions, build_export
+    from inventory.settings import ConfigError, Settings
+
+    settings = Settings()
+    conn = connect(settings.db_path)
+    try:
+        migrate(conn)
+        clusters = None
+        if args.cluster:
+            known = conn.execute("SELECT site, cluster_id FROM clusters").fetchall()
+            clusters = []
+            for item in args.cluster:
+                site, _, cid = item.rpartition("/")
+                site = site or args.site
+                match = [(s, c) for s, c in known if c == cid and (site is None or s == site)]
+                if len(match) != 1:
+                    print(f"error: cluster {item!r} not found or ambiguous; use site/id", file=sys.stderr)
+                    return 1
+                clusters.append(match[0])
+        scope = Scope(site=args.site, clusters=clusters)
+        out = Path(args.out)
+        out.mkdir(parents=True, exist_ok=True)
+        path = build_export(conn, settings, ExportOptions(scope, strict=args.strict), out)
+    except ExportBlocked as e:
+        print("export blocked by the self-check:", file=sys.stderr)
+        for h in e.hits:
+            print(f"  {h.file} column {h.column}: {h.value_sample}", file=sys.stderr)
+        return 1
+    except (ConfigError, ValueError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    finally:
+        conn.close()
+    print(path)
+    return 0
+
+
 def _dispatch(args: argparse.Namespace) -> int:
     if args.command == "check-config":
         return _check_config()
@@ -184,6 +232,8 @@ def _dispatch(args: argparse.Namespace) -> int:
         return _serve()
     if args.command == "healthcheck":
         return _healthcheck()
+    if args.command == "export-discovery":
+        return _export_discovery(args)
     print("not implemented yet")
     return 2
 

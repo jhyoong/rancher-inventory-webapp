@@ -61,7 +61,7 @@ def derive_webhook(obj: dict) -> dict:
     for w in hooks:
         for r in w.get("rules") or []:
             groups, resources = r.get("apiGroups") or [], r.get("resources") or []
-            rules.append(f"{','.join(groups)}:{','.join(resources)}")
+            rules.append(f"{' '.join(groups)}:{' '.join(resources)}")  # as the script prints them
             intercepts_all |= "*" in groups and "*" in resources
     cfg = [w.get("clientConfig") or {} for w in hooks]
     return {

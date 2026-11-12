@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Discovery export - Rancher inventory{% endblock %}
+{% block content %}
+<h1>Discovery export</h1>
+<p>Builds the same per-cluster CSV files as <code>k8s-discovery.sh</code> 1.0.0 from the database, with names hashed.
+The bundle is checked before download: an IP address, a sensitive string or a real name in a hashed column blocks it.</p>
+{% if not salt_set %}<p class="warn">EXPORT_SALT is not set. Add it to .env and restart before exporting.</p>{% endif %}
+{% if hits %}
+<p class="error">The self-check blocked the download. Nothing was saved.</p>
+<table>
+  <tr><th>File</th><th>Column</th><th>Value (masked)</th></tr>
+  {% for h in hits %}<tr><td>{{ h.file }}</td><td>{{ h.column }}</td><td>{{ h.value_sample }}</td></tr>{% endfor %}
+</table>
+{% endif %}
+<form method="post" action="/export/discovery">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <p><label>Site <select name="site"><option value="">all sites</option>
+    {% for s in sites %}<option>{{ s }}</option>{% endfor %}</select></label></p>
+  <p>Clusters (none selected means all in the site scope):<br>
+    {% for c in clusters %}<label><input type="checkbox" name="clusters" value="{{ c.site }}/{{ c.cluster_id }}"> {{ c.site }}/{{ c.name }}</label><br>{% endfor %}</p>
+  <p><label><input type="checkbox" name="strict" value="1"> Strict: also hash image, chart, CRD and StorageClass names</label></p>
+  <button type="submit">Build and download</button>
+</form>
+<p><a href="/export/discovery/name-map.csv">Download the name map</a> (hash to real name; keep it private, it is never in the bundle).</p>
+{% endblock %}

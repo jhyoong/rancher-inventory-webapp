@@ -1,4 +1,5 @@
 import logging
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -92,7 +93,7 @@ async def collect_cluster(
         return ClusterResult("failed", total, 0, 0, error)
 
     ctx = ClusterContext()
-    in_use: set[tuple[str, str]] = set()
+    in_use: Counter[tuple[str, str]] = Counter()
     kind_status: dict[str, str] = {}
     objects = 0
     done = 0
@@ -119,7 +120,7 @@ async def collect_cluster(
             items = [trim(spec, o, rules, ctx) for o in raw if not skip_object(spec.name, o)]
             if spec.name == "pods":
                 ctx.pvc_users = pvc_users(items)
-            in_use.update(t.in_use for t in items if t.in_use)
+            in_use.update(t.in_use for t in items if t.in_use)  # counts objects per (apiVersion, kind)
             count = len(items)
             with transaction(conn):
                 upsert_resources(conn, site, cid, run_id, items)

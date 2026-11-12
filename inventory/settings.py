@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     data_dir: Path = Path("/data")
     sites_file: Path = Path("/config/sites.yaml")
     defaults_dir: Path = Path("/app/defaults")
+    export_salt: str = ""                # shareable export (spec 7); same salt as k8s-discovery.sh gives same hashes
+    export_sensitive_strings: str = ""   # comma-separated; hashed wherever they appear
+
+    @property
+    def sensitive_strings(self) -> list[str]:
+        return [s.strip() for s in self.export_sensitive_strings.split(",") if s.strip()]
 
     @field_validator("collect_daily_at")
     @classmethod
