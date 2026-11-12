@@ -215,3 +215,21 @@ def admin_client_collected(collected_db):
 
     with TestClient(create_app(collected_db, None)) as c:
         yield _login(c, collected_db, "admin", TEST_PASSWORD)
+
+
+@pytest.fixture(scope="session")
+def dev_lists(live_loop, live_client):
+    """Kind name -> raw items from the dev `local` cluster, for every kind in kinds.yaml."""
+    from inventory.collector.kinds import load_kinds
+
+    settings = Settings(
+        sites_file=Path("dev/config/sites.yaml"),
+        defaults_dir=Path("config/defaults"),
+        collector_enabled=False,
+    )
+    kinds = load_kinds(settings)
+
+    async def go():
+        return {k: await live_client.list_kind("local", s.path) for k, s in kinds.items()}
+
+    return live_loop.run_until_complete(go())

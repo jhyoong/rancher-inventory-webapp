@@ -32,8 +32,8 @@ def count(db, sql, *args):
     return db.execute(sql, args).fetchone()[0]
 
 
-def test_collect_local_nodes(db, run, local_cluster):
-    r = run(1)
+def test_collect_local_nodes(db, run, kinds, local_cluster):
+    r = run(1, {"nodes": kinds["nodes"]})
     assert r.status == "ok"
     assert count(db, "SELECT count(*) FROM resources WHERE kind='nodes'") == local_cluster["nodeCount"]
     assert count(db, "SELECT count(*) FROM run_kinds WHERE status='ok'") == 1
@@ -45,11 +45,12 @@ def test_second_run_rewrites_nothing(db, run, kinds, live_loop, live_client, loc
     from inventory.collector.transform import trim
     from inventory.db.repo import upsert_resources
 
-    run(1)
+    only_nodes = {"nodes": kinds["nodes"]}
+    run(1, only_nodes)
     raw = live_loop.run_until_complete(live_client.list_kind("local", kinds["nodes"].path))
     items = [trim(kinds["nodes"], o) for o in raw]
     assert upsert_resources(db, "dev", "local", 2, items) == 0
-    assert run(2).status == "ok"
+    assert run(2, only_nodes).status == "ok"
     assert count(db, "SELECT count(*) FROM resources WHERE last_seen_run != 2") == 0
     assert count(db, "SELECT count(*) FROM resources") == local_cluster["nodeCount"]
 

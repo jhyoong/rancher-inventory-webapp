@@ -2,5 +2,88 @@ kinds:
   nodes:
     path: /api/v1/nodes
     scope: cluster
-    keep:
-      - status.nodeInfo.kubeletVersion
+    keep: [status.addresses, spec.podCIDR, status.nodeInfo.kubeletVersion,
+           status.capacity, status.allocatable]
+
+  namespaces:
+    path: /api/v1/namespaces
+    scope: cluster
+    keep: [status.phase]
+    annotations: true
+
+  pods:
+    path: /api/v1/pods
+    scope: namespaced
+    keep: [spec.nodeName, status.phase, status.qosClass]
+
+  deployments:
+    path: /apis/apps/v1/deployments
+    scope: namespaced
+    keep: [spec.replicas, status.readyReplicas]
+    annotations: true
+
+  statefulsets:
+    path: /apis/apps/v1/statefulsets
+    scope: namespaced
+    keep: [spec.replicas, status.readyReplicas]
+    annotations: true
+
+  daemonsets:
+    path: /apis/apps/v1/daemonsets
+    scope: namespaced
+    keep: [spec.replicas, status.readyReplicas]
+    annotations: true
+
+  persistentvolumes:
+    path: /api/v1/persistentvolumes
+    scope: cluster
+    keep: [spec.capacity.storage, spec.storageClassName, spec.claimRef.namespace,
+           spec.claimRef.name, status.phase]
+
+  persistentvolumeclaims:
+    path: /api/v1/persistentvolumeclaims
+    scope: namespaced
+    keep: [spec.storageClassName, spec.resources.requests.storage, status.phase,
+           status.capacity.storage]
+    annotations: true
+
+  storageclasses:
+    path: /apis/storage.k8s.io/v1/storageclasses
+    scope: cluster
+    keep: [provisioner, reclaimPolicy, volumeBindingMode]
+
+  configmaps:
+    path: /api/v1/configmaps
+    scope: namespaced
+    metadata_only: true
+
+  services:
+    path: /api/v1/services
+    scope: namespaced
+    keep: [spec.type, spec.clusterIPs, spec.externalIPs, spec.loadBalancerIP,
+           spec.externalName, spec.ports, status.loadBalancer.ingress]
+    annotations: true
+    addresses: true
+
+  ingresses:
+    path: /apis/networking.k8s.io/v1/ingresses
+    scope: namespaced
+    keep: [spec.ingressClassName, spec.rules, spec.tls, status.loadBalancer.ingress]
+    annotations: true
+    addresses: true
+
+  customresourcedefinitions:
+    path: /apis/apiextensions.k8s.io/v1/customresourcedefinitions
+    scope: cluster
+    keep: [spec.group, spec.names.kind, spec.scope, spec.versions,
+           status.storedVersions, spec.conversion.strategy]
+    # versions are trimmed to name, served, storage, deprecated; schemas are dropped
+    annotations: true
+
+  helmreleases:
+    path: /apis/catalog.cattle.io/v1/apps
+    scope: namespaced
+    keep: [spec.name, spec.namespace, spec.version,
+           spec.chart.metadata.name, spec.chart.metadata.version,
+           spec.chart.metadata.appVersion,
+           spec.info.status, spec.info.lastDeployed, spec.resources]
