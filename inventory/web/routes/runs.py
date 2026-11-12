@@ -92,6 +92,9 @@ def retry_run(
 def cancel_run(
     request: Request, run_id: int, conn: sqlite3.Connection = Depends(write_db), user: User = Depends(require_admin)
 ):
+    run = queries.run(conn, run_id)
+    if run is None or run["status"] != "running":
+        return render(request, conn, user, "runs.html", runs=queries.runs(conn), message=f"Run {run_id} is not running.")
     request_cancel(conn, run_id)
     log.info("cancel of run %s requested by user=%s", run_id, user.username)
     return RedirectResponse(f"/runs/{run_id}", status_code=303)

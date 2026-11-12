@@ -173,3 +173,48 @@ def test_session_user_checks_disabled_flag(db):
 )
 def test_verify_password_malformed_is_false(stored):
     assert verify_password("some-password-123", stored) is False
+
+
+def test_concurrent_wrong_logins_stop_at_lock(db_path, db):
+    """Failures are counted and inserted atomically, so parallel tries cannot pass the lock."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from inventory.db.connection import connect
+
+    create_user(db, "a", "right-password-1", "admin")
+
+    def attempt(_):
+        conn = connect(db_path)
+        try:
+            return login(conn, "a", "wrong-password-1", 12, NOW)
+        except LoginLocked:
+            return "locked"
+        finally:
+            conn.close()
+
+    with ThreadPoolExecutor(10) as pool:
+        list(pool.map(attempt, range(10)))
+    assert db.execute("SELECT COUNT(*) FROM login_failures").fetchone()[0] == 5
+
+
+def test_old_failures_deleted_on_login(db):
+    db.execute("INSERT INTO login_failures VALUES ('x', ?)", ((NOW - timedelta(hours=1)).isoformat(),))
+    login(db, "someone", "whatever-password", 12, NOW)
+    assert db.execute("SELECT COUNT(*) FROM login_failures WHERE username='x'").fetchone()[0] == 0
+
+
+def test_usernames_stripped_and_lowercased(db):
+    u = create_user(db, " Bob ", "bob-password-123", "viewer")
+    assert u.username == "bob" and [x.username for x in list_users(db)] == ["bob"]
+    assert login(db, "BOB ", "bob-password-123", 12, NOW)
+    set_password(db, " BOB", "bob-password-456")
+    with pytest.raises(ValueError):
+        create_user(db, "bob", "bob-password-123", "viewer")
+
+
+def test_login_log_uses_repr(client, caplog):
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="inventory.web"):
+        client.post("/login", data={"username": "evil\nINFO fake", "password": "wrong-password-x"})
+    assert "'evil\\ninfo fake'" in caplog.text

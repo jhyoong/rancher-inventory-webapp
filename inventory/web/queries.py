@@ -69,6 +69,10 @@ def cluster_metrics(conn: sqlite3.Connection, site: str, cluster_id: str) -> lis
     return [dict(r) for r in rows]
 
 
+def site_names(conn: sqlite3.Connection) -> list[str]:
+    return [r[0] for r in conn.execute("SELECT DISTINCT site FROM clusters ORDER BY site")]
+
+
 def overview(conn: sqlite3.Connection) -> dict:
     row = conn.execute(
         "SELECT COUNT(DISTINCT site), COUNT(*), COALESCE(SUM(node_count), 0) FROM clusters"
@@ -244,9 +248,9 @@ SELECT c.site, c.cluster_id, c.name, c.k8s_version, c.node_count, c.last_ok_at, 
        p.statefulsets, p.pvc_bound, p.pvc_bytes, p.helm_releases, p.crd_groups,
        p.lb_services, p.ingresses, p.network, p.updated_run,
        (SELECT rc.status FROM run_clusters rc WHERE rc.site = c.site AND rc.cluster_id = c.cluster_id
-        ORDER BY rc.run_id DESC LIMIT 1) AS latest_status,
+        AND rc.status IN ('ok', 'failed') ORDER BY rc.run_id DESC LIMIT 1) AS latest_status,
        (SELECT rc.error FROM run_clusters rc WHERE rc.site = c.site AND rc.cluster_id = c.cluster_id
-        ORDER BY rc.run_id DESC LIMIT 1) AS latest_error
+        AND rc.status IN ('ok', 'failed') ORDER BY rc.run_id DESC LIMIT 1) AS latest_error
 FROM clusters c
 LEFT JOIN cluster_profile p ON p.site = c.site AND p.cluster_id = c.cluster_id
 """
@@ -285,7 +289,11 @@ def inventory_rows(conn, site=None, cls=None, flag=None, label=None) -> list[dic
         if sep:
             cond += " AND value = :label_value"
             params["label_value"] = lvalue
-        parts.append(f"EXISTS (SELECT 1 FROM json_each(c.labels) WHERE {cond})")
+        # malformed labels JSON counts as no labels
+        parts.append(
+            "EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(c.labels) THEN c.labels ELSE '{}' END)"
+            f" WHERE {cond})"
+        )
     where = " WHERE " + " AND ".join(parts) if parts else ""
     rows = conn.execute(_INVENTORY_SQL + where + " ORDER BY c.site, c.name", params).fetchall()
     return [_decode_profile(dict(r)) for r in rows]

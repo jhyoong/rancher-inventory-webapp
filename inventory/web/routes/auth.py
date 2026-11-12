@@ -6,7 +6,16 @@ from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse
 
 from inventory.web import auth
-from inventory.web.deps import COOKIE, check_csrf, get_settings, optional_user, read_db, render, write_db
+from inventory.web.deps import (
+    COOKIE,
+    check_csrf,
+    get_settings,
+    optional_user,
+    read_db,
+    render,
+    set_session_cookie,
+    write_db,
+)
 
 log = logging.getLogger("inventory.web")
 router = APIRouter()
@@ -30,21 +39,14 @@ def login_submit(
     try:
         token = auth.login(conn, username, password, settings.session_hours, datetime.now(timezone.utc))
     except auth.LoginLocked:
-        log.warning("login refused, account locked: user=%s", username)
+        log.warning("login refused, account locked: user=%r", auth.normalize_username(username))
         return render(request, conn, None, "login.html", 429, error="Too many failed logins, try again later")
     if token is None:
-        log.warning("login failed: user=%s", username)
+        log.warning("login failed: user=%r", auth.normalize_username(username))
         return render(request, conn, None, "login.html", 401, error="Wrong username or password")
-    log.info("login: user=%s", username)
+    log.info("login: user=%r", auth.normalize_username(username))
     resp = RedirectResponse("/", status_code=303)
-    resp.set_cookie(
-        COOKIE,
-        token,
-        max_age=settings.session_hours * 3600,
-        httponly=True,
-        samesite="lax",
-        secure=settings.cookie_secure,
-    )
+    set_session_cookie(resp, token, settings)
     return resp
 
 

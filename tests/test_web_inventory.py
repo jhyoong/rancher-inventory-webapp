@@ -152,3 +152,60 @@ def test_network_lists_are_capped(admin_client_collected, monkeypatch):
     assert note not in admin_client_collected.get("/network").text
     monkeypatch.setattr(queries, "NETWORK_LIMIT", 1)
     assert note in admin_client_collected.get("/network").text
+
+
+def test_refresh_site_button(admin_client_collected):
+    for path in ("/", "/clusters"):
+        text = admin_client_collected.get(path).text
+        assert 'name="site" value="dev"' in text and "Refresh this site" in text, path
+
+
+def test_failed_marker_survives_running_row(failed_clients, collected_db):
+    admin, _ = failed_clients
+    conn = connect(admin.app.state.settings.db_path)
+    try:
+        conn.execute(
+            "INSERT INTO runs (id, started_at, status, trigger, scope)"
+            " VALUES (1000, '2999-01-02T00:00:00+00:00', 'running', 'manual', '{}')"
+        )
+        conn.execute("INSERT INTO run_clusters (run_id, site, cluster_id, status) VALUES (1000, 'dev', 'local', 'running')")
+    finally:
+        conn.close()
+    for path in ("/inventory", "/clusters/dev/local"):
+        assert "last collection failed" in admin.get(path).text, path
+
+
+def test_daemonset_ready_fields(collected_db):
+    conn = connect(collected_db.db_path)
+    try:
+        rows = [json.loads(r[0]) for r in conn.execute("SELECT data FROM resources WHERE kind='daemonsets'")]
+    finally:
+        conn.close()
+    assert rows
+    for d in rows:
+        assert "numberReady" in d["status"] and "desiredNumberScheduled" in d["status"]
+        assert "readyReplicas" not in d.get("status", {}) and "replicas" not in d.get("spec", {})
+
+
+def test_bad_label_json_is_empty(collected_db, tmp_path):
+    shutil.copy(collected_db.db_path, tmp_path / "inventory.db")
+    conn = connect(tmp_path / "inventory.db")
+    try:
+        conn.execute("UPDATE clusters SET labels='{not json' WHERE cluster_id='local'")
+        assert queries.inventory_rows(conn, label="provider.cattle.io") == []
+    finally:
+        conn.close()
+
+
+def test_annotation_objects_cap_note(admin_client_collected, monkeypatch):
+    conn = connect(admin_client_collected.app.state.settings.db_path, readonly=True)
+    try:
+        key = queries.annotation_keys(conn)[0]["key"]
+    finally:
+        conn.close()
+    from inventory.web.routes import annotations as ann_route
+
+    monkeypatch.setattr(ann_route, "ANNOTATION_LIMIT", 1, raising=False)
+    from urllib.parse import quote
+
+    assert "Showing the first 1 rows." in admin_client_collected.get(f"/annotations?key={quote(key)}").text

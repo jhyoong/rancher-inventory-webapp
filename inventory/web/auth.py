@@ -63,10 +63,15 @@ def _user(row: sqlite3.Row) -> User:
     return User(row["id"], row["username"], row["role"], bool(row["disabled"]))
 
 
+def normalize_username(username: str) -> str:
+    return username.strip().lower()
+
+
 def create_user(conn, username: str, password: str, role: str) -> User:
+    username = normalize_username(username)
     if role not in ROLES:
         raise ValueError("role must be admin or viewer")
-    if not username.strip():
+    if not username:
         raise ValueError("username is required")
     pw_hash = hash_password(password)
     try:
@@ -82,6 +87,7 @@ def create_user(conn, username: str, password: str, role: str) -> User:
 
 
 def _require_user(conn, username: str) -> int:
+    username = normalize_username(username)
     row = conn.execute("SELECT id FROM users WHERE username=?", (username,)).fetchone()
     if row is None:
         raise ValueError(f"unknown user {username}")
@@ -123,27 +129,40 @@ def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def login(conn, username: str, password: str, hours: int, now: datetime) -> str | None:
-    since = _iso(now - LOCK_WINDOW)
-    failures = conn.execute(
+def _recent_failures(conn, username: str, since: str) -> int:
+    return conn.execute(
         "SELECT COUNT(*) FROM login_failures WHERE username=? AND failed_at>?", (username, since)
     ).fetchone()[0]
-    if failures >= LOCK_FAILURES:
+
+
+def login(conn, username: str, password: str, hours: int, now: datetime) -> str | None:
+    """Return a session token, None for a failed login, or raise LoginLocked.
+
+    The lock is checked before and again after the password verify, in the same
+    transaction as the failure insert, so parallel attempts cannot pass it.
+    """
+    username = normalize_username(username)
+    since = _iso(now - LOCK_WINDOW)
+    with transaction(conn):
+        conn.execute("DELETE FROM login_failures WHERE failed_at<=?", (since,))
+    if _recent_failures(conn, username, since) >= LOCK_FAILURES:
         raise LoginLocked(username)
     row = conn.execute(
         "SELECT id, password_hash, disabled FROM users WHERE username=?", (username,)
     ).fetchone()
     # Always run one scrypt verify so unknown users cost the same time.
     ok = verify_password(password, row["password_hash"] if row else _DUMMY_HASH)
-    if row is None or not ok or row["disabled"]:
-        with transaction(conn):
+    success = row is not None and ok and not row["disabled"]
+    token = secrets.token_urlsafe(32)
+    with transaction(conn):
+        if _recent_failures(conn, username, since) >= LOCK_FAILURES:
+            raise LoginLocked(username)
+        if not success:
             conn.execute(
                 "INSERT INTO login_failures (username, failed_at) VALUES (?, ?)",
                 (username, _iso(now)),
             )
-        return None
-    token = secrets.token_urlsafe(32)
-    with transaction(conn):
+            return None
         conn.execute("DELETE FROM login_failures WHERE username=?", (username,))
         conn.execute("DELETE FROM sessions WHERE expires_at<=?", (_iso(now),))
         conn.execute(

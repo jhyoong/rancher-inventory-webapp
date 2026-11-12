@@ -1,6 +1,8 @@
 {% extends "base.html" %}
+{% from "_site_refresh.html" import site_refresh with context %}
 {% block content %}
 <h1>Overview</h1>
+{{ site_refresh(site_names) }}
 <div class="cards">
   <div class="card"><div class="num">{{ overview.sites }}</div>Sites</div>
   <div class="card"><div class="num">{{ overview.clusters }}</div>Clusters</div>

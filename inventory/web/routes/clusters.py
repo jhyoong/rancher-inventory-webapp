@@ -12,7 +12,7 @@ router = APIRouter()
 
 @router.get("/clusters")
 def clusters(request: Request, conn: sqlite3.Connection = Depends(read_db), user: User = Depends(current_user)):
-    return render(request, conn, user, "clusters.html", clusters=queries.clusters(conn))
+    return render(request, conn, user, "clusters.html", clusters=queries.clusters(conn), site_names=queries.site_names(conn))
 
 
 @router.get("/clusters/{site}/{cluster_id}")

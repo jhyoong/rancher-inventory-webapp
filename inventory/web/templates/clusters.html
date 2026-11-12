@@ -1,7 +1,9 @@
 {% extends "base.html" %}
+{% from "_site_refresh.html" import site_refresh with context %}
 {% block title %}Clusters - Rancher inventory{% endblock %}
 {% block content %}
 <h1>Clusters</h1>
+{{ site_refresh(site_names) }}
 <table>
   <tr>
     <th>Site</th><th>Name</th><th>State</th><th>Provider</th><th>Kubernetes</th><th>Nodes</th>

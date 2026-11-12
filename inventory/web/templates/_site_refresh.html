@@ -1,0 +1,9 @@
+{% macro site_refresh(sites) %}{% if user.role == "admin" and sites %}
+<p>{% for s in sites %}
+  <form method="post" action="/runs" class="inline">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="site" value="{{ s }}">
+    <button type="submit">Refresh this site: {{ s }}</button>
+  </form>
+{% endfor %}</p>
+{% endif %}{% endmacro %}

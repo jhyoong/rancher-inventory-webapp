@@ -208,3 +208,60 @@ def test_refresh_with_stopped_collector_is_503(admin_client, web_settings):
     admin_client.app.state.collector = t
     r = admin_client.post("/runs", data={"csrf": admin_client.csrf}, follow_redirects=False)
     assert r.status_code == 503
+
+
+def test_admin_resets_own_password_stays_logged_in(admin_client):
+    data = {"csrf": admin_client.csrf, "action": "reset", "username": "admin", "password": "new-admin-password-1"}
+    r = admin_client.post("/admin/users", data=data)
+    assert r.status_code == 200 and "new session" in r.text
+    assert admin_client.get("/", follow_redirects=False).status_code == 200
+
+
+def test_cancel_unknown_run_shows_message(admin_client):
+    r = admin_client.post("/runs/999/cancel", data={"csrf": admin_client.csrf})
+    assert r.status_code == 200 and "Run 999 is not running" in r.text
+
+
+def test_cancel_finished_run_shows_message(admin_client, db):
+    rid = create_run(db, "manual", "t", Scope())
+    db.execute("UPDATE runs SET status='ok' WHERE id=?", (rid,))
+    r = admin_client.post(f"/runs/{rid}/cancel", data={"csrf": admin_client.csrf})
+    assert r.status_code == 200 and f"Run {rid} is not running" in r.text
+
+
+@pytest.mark.parametrize("command", ["serve", "healthcheck"])
+def test_half_tls_config_exits_1(monkeypatch, capsys, command):
+    from inventory.cli import main
+
+    monkeypatch.setenv("TLS_CERT_FILE", "/tmp/cert.pem")
+    monkeypatch.delenv("TLS_KEY_FILE", raising=False)
+    assert main([command]) == 1
+    assert "TLS_CERT_FILE and TLS_KEY_FILE" in capsys.readouterr().err
+
+
+def test_html_error_pages(admin_client, viewer_client, db):
+    r = admin_client.get("/clusters/dev/nope")
+    assert r.status_code == 404 and r.headers["content-type"].startswith("text/html") and "Not found" in r.text
+    r = viewer_client.get("/admin/users")
+    assert r.status_code == 403 and r.headers["content-type"].startswith("text/html")
+    create_run(db, "manual", "t", Scope())
+    r = admin_client.post("/runs", data={"csrf": admin_client.csrf})
+    assert r.status_code == 409 and r.headers["content-type"].startswith("text/html")
+    r = admin_client.post("/runs", data={"csrf": admin_client.csrf, "cluster_id": "x"})
+    assert r.status_code in (400, 409) and r.headers["content-type"].startswith("text/html")
+
+
+def test_htmx_errors_stay_plain(client):
+    r = client.get("/runs/progress", headers={"HX-Request": "true"})
+    assert r.status_code == 401 and r.headers["content-type"].startswith("application/json")
+
+
+def test_x_frame_options(client, admin_client):
+    assert client.get("/login").headers["x-frame-options"] == "DENY"
+    assert admin_client.get("/").headers["x-frame-options"] == "DENY"
+
+
+def test_dt_filter_keeps_unparseable_text():
+    from inventory.web.deps import _dt
+
+    assert _dt("not a time") == "not a time"

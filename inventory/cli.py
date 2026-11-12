@@ -101,6 +101,13 @@ def _user_command(args) -> int:
         conn.close()
 
 
+def _tls_pair_ok(settings) -> bool:
+    if bool(settings.tls_cert_file) != bool(settings.tls_key_file):
+        print("config error: set both TLS_CERT_FILE and TLS_KEY_FILE, or neither", file=sys.stderr)
+        return False
+    return True
+
+
 def _serve() -> int:
     import logging
 
@@ -115,6 +122,8 @@ def _serve() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)  # no line per Rancher request
     settings = Settings()
+    if not _tls_pair_ok(settings):
+        return 1
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     conn = connect(settings.db_path)
     try:
@@ -139,6 +148,8 @@ def _healthcheck() -> int:
     from inventory.settings import Settings
 
     settings = Settings()
+    if not _tls_pair_ok(settings):
+        return 1
     scheme = "https" if settings.tls_cert_file and settings.tls_key_file else "http"
     try:
         r = httpx.get(f"{scheme}://127.0.0.1:{settings.listen_port}/healthz", verify=False, timeout=10)

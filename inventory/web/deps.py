@@ -23,7 +23,10 @@ def _dt(value: datetime | str | None) -> str:
     if not value:
         return "-"
     if isinstance(value, str):
-        value = datetime.fromisoformat(value)
+        try:
+            value = datetime.fromisoformat(value)
+        except ValueError:
+            return value
     return value.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 
@@ -50,6 +53,17 @@ def _size(b: int | None) -> str:
 
 
 templates.env.filters.update(dt=_dt, cores=_cores, gib=_gib, secs=_secs, size=_size)
+
+
+def set_session_cookie(resp, token: str, settings: Settings) -> None:
+    resp.set_cookie(
+        COOKIE,
+        token,
+        max_age=settings.session_hours * 3600,
+        httponly=True,
+        samesite="lax",
+        secure=settings.cookie_secure,
+    )
 
 
 def get_settings(request: Request) -> Settings:
@@ -111,10 +125,12 @@ def render(
     user: User | None,
     name: str,
     status_code: int = 200,
+    session_token: str | None = None,
     **ctx,
 ):
+    """session_token overrides the request cookie, for a response that sets a new session."""
     settings = get_settings(request)
-    token = request.cookies.get(COOKIE)
+    token = session_token or request.cookies.get(COOKIE)
     ctx.update(
         user=user,
         csrf=csrf_token(settings.session_secret, token) if user and token else "",
