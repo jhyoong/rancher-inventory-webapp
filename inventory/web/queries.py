@@ -400,16 +400,18 @@ def nodeport_and_external_services(conn) -> list[dict]:
 
 
 def duplicate_addresses(conn) -> list[dict]:
+    """An lb, ingress-lb or ingress-host address found in more than one cluster, any role mix."""
     rows = conn.execute(
-        """SELECT a.address, a.role, COUNT(DISTINCT r.site || '/' || r.cluster_id) AS clusters,
+        """SELECT lower(a.address) AS address, group_concat(DISTINCT a.role) AS role,
+                  COUNT(DISTINCT r.site || '/' || r.cluster_id) AS clusters,
                   group_concat(DISTINCT r.site || '/' || c.name) AS where_found
            FROM addresses a
            JOIN resources r ON r.id = a.resource_id
            JOIN clusters c ON c.site = r.site AND c.cluster_id = r.cluster_id
            WHERE a.role IN ('lb', 'ingress-lb', 'ingress-host')
-           GROUP BY a.address, a.role
+           GROUP BY lower(a.address)
            HAVING clusters > 1
-           ORDER BY a.address"""
+           ORDER BY address"""
     ).fetchall()
     return [dict(r) for r in rows]
 

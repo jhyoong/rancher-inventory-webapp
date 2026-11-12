@@ -8,7 +8,7 @@
       <td>{{ r.namespace }}</td><td>{{ r.name }}</td><td>{{ r.role }}</td><td>{{ r.address }}</td><td>{{ r.ports or "" }}</td>
       {% if annotations %}<td><pre class="cell">{{ r.annotations or "" }}</pre></td>{% endif %}</tr>
   {% else %}
-  <tr><td colspan="9">None.</td></tr>
+  <tr><td colspan="{{ 9 if annotations else 8 }}">None.</td></tr>
   {% endfor %}
 </table>
 {% endmacro %}
