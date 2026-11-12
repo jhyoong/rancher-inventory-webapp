@@ -1,0 +1,6 @@
+sites:
+  - name: dev
+    url: https://rancher.local
+    token_env: RANCHER_DEV_TOKEN
+    tls_verify: false
+    token_expires: 2027-02-10

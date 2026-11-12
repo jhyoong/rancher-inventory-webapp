@@ -1,0 +1,35 @@
+[project]
+name = "rancher-inventory"
+version = "0.1.0"
+description = "Rancher inventory web app"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "httpx",
+    "jinja2",
+    "pydantic-settings",
+    "pyyaml",
+    "python-multipart",
+]
+
+[dependency-groups]
+dev = ["pytest"]
+
+[project.scripts]
+inventory = "inventory.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["inventory"]
+include = [
+    "inventory/web/templates/*",
+    "inventory/web/static/*",
+    "inventory/db/migrations/*.sql",
+]
+
+[tool.pytest.ini_options]
+markers = ["live: needs the dev Rancher"]
