@@ -39,3 +39,43 @@ def db(db_path):
     migrate(conn)
     yield conn
     conn.close()
+
+
+@pytest.fixture(scope="session")
+def dev_live():
+    """Live data from the dev Rancher, read once with one client."""
+    import asyncio
+
+    from inventory.rancher.client import RancherClient
+    from inventory.settings import site_token
+
+    settings = Settings(
+        sites_file=Path("dev/config/sites.yaml"),
+        defaults_dir=Path("config/defaults"),
+        collector_enabled=False,
+    )
+    site = load_sites(settings)[0]
+
+    async def go():
+        async with RancherClient(site, site_token(site), settings.request_timeout_s) as client:
+            clusters = await client.list_clusters()
+            usage = await client.list_kind("local", "/apis/metrics.k8s.io/v1beta1/nodes")
+            return clusters, usage
+
+    clusters, usage = asyncio.run(go())
+    return {"clusters": clusters, "node_usage": usage}
+
+
+@pytest.fixture(scope="session")
+def dev_clusters(dev_live):
+    return dev_live["clusters"]
+
+
+@pytest.fixture(scope="session")
+def dev_node_usage(dev_live):
+    return dev_live["node_usage"]
+
+
+@pytest.fixture(scope="session")
+def local_cluster(dev_clusters):
+    return next(c for c in dev_clusters if c["id"] == "local")
