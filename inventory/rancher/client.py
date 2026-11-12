@@ -1,3 +1,4 @@
+import ssl
 from urllib.parse import parse_qsl
 
 import httpx
@@ -15,9 +16,11 @@ class RancherError(Exception):
 class RancherClient:
     def __init__(self, site: Site, token: str, timeout_s: float):
         if not site.tls_verify:
-            verify: bool | str = False
+            verify: bool | ssl.SSLContext = False
+        elif site.ca_file:
+            verify = ssl.create_default_context(cafile=site.ca_file)
         else:
-            verify = site.ca_file or True
+            verify = True
         self._base = site.url.rstrip("/")
         self._http = httpx.AsyncClient(
             base_url=self._base,

@@ -172,3 +172,93 @@ def test_cancelled_task_ends_interrupted(settings, db, db_path):
     run = connect(db_path).execute("SELECT status, finished_at FROM runs WHERE id=?", [rid]).fetchone()
     assert run["status"] == "interrupted" and run["finished_at"]
     assert create_run(connect(db_path), "manual", "t", Scope()) > rid
+
+
+@pytest.mark.live
+def test_bad_ca_file_site_does_not_stop_other_sites(settings, db, db_path, tmp_path, monkeypatch):
+    """A site whose CA file is missing is a site error; the other sites still collect."""
+    import os
+
+    monkeypatch.setenv("RANCHER_DEVBAD_TOKEN", os.environ["RANCHER_DEV_TOKEN"])
+    sites = tmp_path / "sites.yaml"
+    sites.write_text(
+        "sites:\n"
+        "  - name: dev\n    url: https://rancher.local\n    token_env: RANCHER_DEV_TOKEN\n    tls_verify: false\n"
+        "  - name: dev-badca\n    url: https://rancher.local\n    token_env: RANCHER_DEVBAD_TOKEN\n"
+        f"    ca_file: {tmp_path / 'missing-ca.pem'}\n"
+    )
+    s = settings.model_copy(update={"sites_file": sites, "defaults_dir": settings.defaults_dir.resolve()})
+    rid = create_run(connect(db_path), "manual", "t", Scope())
+    assert asyncio.run(execute_run(s, rid)) == "partial"
+    conn = connect(db_path)
+    row = conn.execute("SELECT * FROM run_clusters WHERE run_id=? AND site='dev'", [rid]).fetchone()
+    assert row["cluster_id"] == "local" and row["status"] == "ok"
+    run = conn.execute("SELECT * FROM runs WHERE id=?", [rid]).fetchone()
+    assert "dev-badca" in run["error"]
+
+
+@pytest.mark.live
+def test_full_run_removes_clusters_gone_from_rancher(collected_db, tmp_path):
+    """Rows of a cluster that Rancher no longer lists are removed by a full run.
+
+    The removed cluster is simulated by copying the real collected rows of `local`
+    under the id 'c-gone'. Daily metrics history and run history are kept.
+    """
+    import shutil
+
+    shutil.copy(collected_db.db_path, tmp_path / "inventory.db")
+    s = collected_db.model_copy(update={"data_dir": tmp_path})
+    conn = connect(s.db_path)
+    conn.execute("BEGIN")
+    conn.execute(
+        "INSERT INTO clusters SELECT site, 'c-gone', name, state, provider, k8s_version, labels, node_count, "
+        "last_ok_run, last_ok_at, last_error, last_seen_run FROM clusters WHERE cluster_id='local'"
+    )
+    conn.execute(
+        "INSERT INTO resources (site, cluster_id, kind, namespace, name, data, hash, created_at, last_seen_run) "
+        "SELECT site, 'c-gone', kind, namespace, name, data, hash, created_at, last_seen_run "
+        "FROM resources WHERE cluster_id='local'"
+    )
+    conn.execute(
+        "INSERT INTO resource_labels SELECT g.id, l.key, l.value FROM resource_labels l "
+        "JOIN resources r ON r.id=l.resource_id "
+        "JOIN resources g ON g.cluster_id='c-gone' AND g.site=r.site AND g.kind=r.kind "
+        "AND g.namespace=r.namespace AND g.name=r.name WHERE r.cluster_id='local'"
+    )
+    for table in ("namespace_profile", "cluster_profile", "cluster_metrics_latest", "cluster_metrics", "run_clusters"):
+        cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})")]
+        select = ", ".join("'c-gone'" if c == "cluster_id" else c for c in cols)
+        conn.execute(f"INSERT INTO {table} ({', '.join(cols)}) SELECT {select} FROM {table} WHERE cluster_id='local'")
+    conn.execute("COMMIT")
+    assert conn.execute("SELECT count(*) FROM resource_labels l JOIN resources r ON r.id=l.resource_id "
+                        "WHERE r.cluster_id='c-gone'").fetchone()[0] > 0
+
+    rid = create_run(conn, "manual", "t", Scope())
+    assert asyncio.run(execute_run(s, rid)) == "ok"
+
+    def count(table, cid):
+        return conn.execute(f"SELECT count(*) FROM {table} WHERE cluster_id=?", [cid]).fetchone()[0]
+
+    for table in ("clusters", "resources", "namespace_profile", "cluster_profile", "cluster_metrics_latest"):
+        assert count(table, "c-gone") == 0, table
+        assert count(table, "local") > 0, table
+    assert conn.execute("SELECT count(*) FROM resource_labels l LEFT JOIN resources r ON r.id=l.resource_id "
+                        "WHERE r.id IS NULL").fetchone()[0] == 0
+    assert count("cluster_metrics", "c-gone") > 0
+    assert count("run_clusters", "c-gone") > 0
+
+
+@pytest.mark.live
+def test_scoped_run_keeps_unlisted_clusters(collected_db, tmp_path):
+    import shutil
+
+    shutil.copy(collected_db.db_path, tmp_path / "inventory.db")
+    s = collected_db.model_copy(update={"data_dir": tmp_path})
+    conn = connect(s.db_path)
+    conn.execute(
+        "INSERT INTO clusters SELECT site, 'c-gone', name, state, provider, k8s_version, labels, node_count, "
+        "last_ok_run, last_ok_at, last_error, last_seen_run FROM clusters WHERE cluster_id='local'"
+    )
+    rid = create_run(conn, "manual", "t", Scope(site="dev", cluster_id="local"))
+    assert asyncio.run(execute_run(s, rid)) == "ok"
+    assert conn.execute("SELECT count(*) FROM clusters WHERE cluster_id='c-gone'").fetchone()[0] == 1

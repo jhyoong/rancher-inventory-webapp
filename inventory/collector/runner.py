@@ -214,12 +214,17 @@ async def _execute(settings: Settings, conn: sqlite3.Connection, run_id: int, sh
     async with AsyncExitStack() as stack:
         clients: dict[str, tuple[RancherClient, str]] = {}
         for site in sites:
+            token = None
             try:
                 token = site_token(site)
+                client = await stack.enter_async_context(RancherClient(site, token, settings.request_timeout_s))
             except ConfigError as e:
                 site_errors.append(f"{site.name}: {e}")
                 continue
-            client = await stack.enter_async_context(RancherClient(site, token, settings.request_timeout_s))
+            except Exception as e:  # e.g. a missing or bad ca_file
+                log.warning("site %s: could not create client: %s", site.name, type(e).__name__)
+                site_errors.append(f"{site.name}: " + _scrub(f"{type(e).__name__}: {e}", token))
+                continue
             clients[site.name] = (client, token)
 
         async def list_site(site: Site) -> list[dict] | None:
@@ -233,7 +238,10 @@ async def _execute(settings: Settings, conn: sqlite3.Connection, run_id: int, sh
         listed_sites = [s for s in sites if s.name in clients]
         listed = await asyncio.gather(*(list_site(s) for s in listed_sites))
         work: list[tuple[Site, dict]] = []
+        full_scope = scope == Scope()
         for site, clusters in zip(listed_sites, listed):
+            if full_scope and clusters is not None:
+                _remove_unlisted(conn, site.name, {c["id"] for c in clusters})
             for cluster in clusters or []:
                 if scope.includes(site.name, cluster["id"]):
                     work.append((site, cluster))
@@ -261,6 +269,19 @@ async def _execute(settings: Settings, conn: sqlite3.Connection, run_id: int, sh
     status = _final_status(cancelled(), should_stop(), len(sites), site_errors, list(statuses))
     _finish(conn, run_id, status, "; ".join(site_errors) or None)
     return status
+
+
+def _remove_unlisted(conn: sqlite3.Connection, site: str, listed: set[str]) -> None:
+    """Delete current data of clusters Rancher no longer lists for a site.
+
+    Daily cluster_metrics history and run_clusters history are kept.
+    """
+    known = [r[0] for r in conn.execute("SELECT cluster_id FROM clusters WHERE site=?", (site,))]
+    for cid in sorted(set(known) - listed):
+        with transaction(conn):
+            for table in ("resources", "namespace_profile", "cluster_profile", "cluster_metrics_latest", "clusters"):
+                conn.execute(f"DELETE FROM {table} WHERE site=? AND cluster_id=?", (site, cid))
+        log.info("removed cluster %s/%s: Rancher no longer lists it", site, cid)
 
 
 async def _run_cluster(
