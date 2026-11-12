@@ -4,7 +4,7 @@ A web app that keeps a daily inventory of every downstream cluster managed by on
 
 The full design is in [Rancher Inventory Tool Implementation Plan (single image, airgap).md](<Rancher Inventory Tool Implementation Plan (single image, airgap).md>).
 
-Status: planning. The code does not exist yet. This README describes the setup the app will expect.
+Status: plan 1 is built and runs on the dev Mac against the dev Rancher. The rest of the plan is not built yet. This README describes the setup the app expects.
 
 ## Contents
 
@@ -15,6 +15,7 @@ Status: planning. The code does not exist yet. This README describes the setup t
 5. [The `config/sites.yaml` file](#the-configsitesyaml-file)
 6. [Check and run](#check-and-run)
 7. [Dev cluster notes](#dev-cluster-notes)
+8. [Run on the dev Mac](#run-on-the-dev-mac)
 
 ## What you need
 
@@ -333,7 +334,7 @@ The dev Rancher server at `192.168.50.210`:
   192.168.50.210 rancher.local
   ```
 
-- The ingress serves its self-signed placeholder certificate (`Kubernetes Ingress Controller Fake Certificate`, SAN `ingress.local`). It does not match `rancher.local`, so a `ca_file` alone will not make TLS verify. Fix it on the cluster by giving the Rancher ingress a certificate for `rancher.local`, or decide on a dev-only option to skip TLS checks (not in the plan yet).
+- The ingress serves its self-signed placeholder certificate (`Kubernetes Ingress Controller Fake Certificate`, SAN `ingress.local`). It does not match `rancher.local`, so a `ca_file` alone will not make TLS verify. The dev site therefore uses `tls_verify: false`. This is for dev only. Fix it on the cluster by giving the Rancher ingress a certificate for `rancher.local`.
 
 Example dev `sites.yaml`:
 
@@ -342,6 +343,31 @@ sites:
   - name: dev
     url: https://rancher.local
     token_env: RANCHER_DEV_TOKEN
-    ca_file: /config/ca/rancher-dev.pem
+    tls_verify: false
     token_expires: 2027-02-10
 ```
+
+## Run on the dev Mac
+
+Build the image and run it against the dev Rancher. This needs `.env` and `dev/config/sites.yaml` in the repo.
+
+```bash
+docker build -t rancher-inventory:1.0.0-dev .
+
+mkdir -p dev/data
+docker run -d --name rancher-inventory \
+  --env-file .env \
+  --add-host rancher.local:192.168.50.210 \
+  -v $PWD/dev/config:/config:ro \
+  -v $PWD/dev/data:/data \
+  -p 8443:8443 \
+  --read-only --tmpfs /tmp --cap-drop ALL \
+  rancher-inventory:1.0.0-dev
+docker logs -f rancher-inventory
+```
+
+- The log shows the first admin being created and a first run starting when there is no good run yet.
+- If `/data` is not writable, run `chmod 777 dev/data`. Docker Desktop on macOS maps ownership. This is for dev only.
+- Check health after about a minute: `docker inspect --format '{{.State.Health.Status}}' rancher-inventory` should print `healthy`.
+- Open `http://localhost:8443` and log in with `ADMIN_USER` and `ADMIN_PASSWORD` from `.env`.
+- Stop and remove: `docker rm -f rancher-inventory`. The data stays in `dev/data`.
