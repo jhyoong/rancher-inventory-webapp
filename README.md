@@ -231,6 +231,8 @@ TLS_KEY_FILE=/config/tls/server.key
 # Required. Generate with: openssl rand -hex 32
 SESSION_SECRET=
 SESSION_HOURS=12
+# Keep true. Set false only for plain-HTTP dev on localhost
+COOKIE_SECURE=true
 
 # ---- First admin ----
 # Used only on first start, when no users exist. Remove ADMIN_PASSWORD after.
@@ -270,6 +272,7 @@ EXPORT_SENSITIVE_STRINGS=example.com,ExampleCorp
 | `ADMIN_PASSWORD` | First start | A password of 12 or more characters. Remove the line after the first start |
 | `RANCHER_<NAME>_TOKEN` | Yes, per site | The bearer token from Rancher setup step 5 |
 | `TLS_CERT_FILE`, `TLS_KEY_FILE` | No | Paths inside the container. Empty means plain HTTP |
+| `COOKIE_SECURE` | No | Default `true`. Set `false` only for plain-HTTP dev on localhost |
 | `COLLECT_DAILY_AT` | No | Daily start time, default `02:00` |
 | `EXPORT_SALT` | For export | A long random string. Keep it; changing it changes every hash |
 | `EXPORT_SENSITIVE_STRINGS` | For export | Your internal domains and company names |

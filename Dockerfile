@@ -15,6 +15,6 @@ RUN mkdir -p /data && chown 10001:10001 /data
 USER 10001
 VOLUME /data
 EXPOSE 8443
-HEALTHCHECK --interval=1m CMD ["inventory", "healthcheck"]
+HEALTHCHECK --interval=1m --timeout=10s --start-period=2m CMD ["inventory", "healthcheck"]
 ENTRYPOINT ["inventory"]
 CMD ["serve"]

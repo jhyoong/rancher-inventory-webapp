@@ -113,6 +113,7 @@ def _serve() -> int:
     from inventory.web.app import create_app
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARNING)  # no line per Rancher request
     settings = Settings()
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     conn = connect(settings.db_path)
