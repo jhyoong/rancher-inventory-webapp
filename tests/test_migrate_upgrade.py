@@ -8,7 +8,10 @@ from inventory.web.auth import create_user, list_users
 
 def _copy_v1_rows(src, dst) -> None:
     """Fill a version 1 DB with the real rows of a collected DB, v1 columns only."""
+    accounts = {"users", "sessions", "presets", "login_failures"}  # this test creates its own
     for (table,) in dst.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall():
+        if table in accounts:
+            continue
         cols = [r[1] for r in dst.execute(f"PRAGMA table_info({table})")]
         rows = src.execute(f"SELECT {', '.join(cols)} FROM {table}").fetchall()
         if rows:
@@ -23,7 +26,6 @@ def test_upgrade_v1_to_v2_keeps_data(tmp_path, collected_db, open_db):
     assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
     conn.execute("BEGIN")
     _copy_v1_rows(open_db(collected_db.db_path, readonly=True), conn)
-    conn.execute("DELETE FROM users")
     conn.execute("COMMIT")
     user = create_user(conn, "keep", "keep-password-123", "viewer")
     conn.execute(
