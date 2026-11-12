@@ -32,10 +32,37 @@ def _check_config() -> int:
     return 0 if all(c.ok for c in checks) else 1
 
 
+def _collect_once() -> int:
+    import time
+
+    from inventory.collector.runner import RunInProgress, Scope, create_run, execute_run
+    from inventory.db.connection import connect
+    from inventory.db.migrate import migrate
+    from inventory.settings import Settings
+
+    settings = Settings()
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
+    conn = connect(settings.db_path)
+    try:
+        migrate(conn)
+        run_id = create_run(conn, "manual", "cli", Scope())
+    except RunInProgress as e:
+        print(f"run {e.run_id} is already in progress", file=sys.stderr)
+        return 1
+    finally:
+        conn.close()
+    t0 = time.monotonic()
+    status = asyncio.run(execute_run(settings, run_id))
+    print(f"run {run_id}: {status} in {time.monotonic() - t0:.1f} s")
+    return 0 if status in ("ok", "partial") else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     if args.command == "check-config":
         return _check_config()
+    if args.command == "collect-once":
+        return _collect_once()
     print("not implemented yet")
     return 2
 
