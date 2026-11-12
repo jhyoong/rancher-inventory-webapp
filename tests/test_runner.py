@@ -262,3 +262,17 @@ def test_scoped_run_keeps_unlisted_clusters(collected_db, tmp_path):
     rid = create_run(conn, "manual", "t", Scope(site="dev", cluster_id="local"))
     assert asyncio.run(execute_run(s, rid)) == "ok"
     assert conn.execute("SELECT count(*) FROM clusters WHERE cluster_id='c-gone'").fetchone()[0] == 1
+
+
+@pytest.mark.live
+def test_metrics_error_does_not_fail_cluster(settings, db, db_path, monkeypatch):
+    from inventory.collector import cluster as cluster_mod
+
+    def broken(*args, **kwargs):
+        raise ValueError("bad quantity")
+
+    monkeypatch.setattr(cluster_mod, "metrics_from_cluster", broken)
+    rid = create_run(connect(db_path), "manual", "t", Scope())
+    assert asyncio.run(execute_run(settings, rid)) == "ok"
+    row = connect(db_path).execute("SELECT status FROM run_clusters WHERE run_id=?", [rid]).fetchone()
+    assert row["status"] == "ok"

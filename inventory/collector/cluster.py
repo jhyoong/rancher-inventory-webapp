@@ -100,14 +100,17 @@ async def collect_cluster(
         done += 1
         on_progress(done, total)
 
-    try:
-        usage = await client.list_kind(cid, NODE_USAGE_PATH)
-    except RancherError:
-        usage = None
-    write_metrics(
-        conn, site, cid, run_id, datetime.now(timezone.utc).date().isoformat(),
-        metrics_from_cluster(cluster, usage), retention_days=retention_days,
-    )  # fmt: skip
+    try:  # metrics problems never fail a collected cluster
+        try:
+            usage = await client.list_kind(cid, NODE_USAGE_PATH)
+        except RancherError:
+            usage = None
+        write_metrics(
+            conn, site, cid, run_id, datetime.now(timezone.utc).date().isoformat(),
+            metrics_from_cluster(cluster, usage), retention_days=retention_days,
+        )  # fmt: skip
+    except Exception:
+        logger.exception("metrics skipped for %s/%s", site, cid)
 
     error = None
     if rules is not None and not stopped and not failed_kinds:
