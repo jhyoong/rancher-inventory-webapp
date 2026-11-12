@@ -1,8 +1,10 @@
 {% extends "base.html" %}
+{% from "_csv.html" import csv_link with context %}
 {% from "_site_refresh.html" import site_refresh with context %}
 {% block title %}Clusters - Rancher inventory{% endblock %}
 {% block content %}
 <h1>Clusters</h1>
+<p>{{ csv_link("clusters") }}</p>
 {{ site_refresh(site_names) }}
 <table>
   <tr>

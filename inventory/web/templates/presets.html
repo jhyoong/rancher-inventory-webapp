@@ -7,11 +7,11 @@
   {% for p in presets %}
   <tr>
     <td>{{ p.name }}</td>
-    <td>{% for k, v in p.filters.items() %}{{ k }}={{ v }}{% if not loop.last %}, {% endif %}{% endfor %}</td>
+    <td>{% if p.filters is none %}<span class="warn">invalid preset</span>{% else %}{% for k, v in p.filters.items() %}{{ k }}={{ v }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}</td>
     <td>{{ p.creator or "-" }}</td>
     <td>{{ p.created_at | dt }}</td>
     <td>
-      <a href="/query?{{ p.filters | urlencode }}">Run</a>
+      {% if p.filters is not none %}<a href="/query?{{ p.filters | urlencode }}">Run</a>{% endif %}
       <a href="/check?preset={{ p.id }}">Check</a>
       {% if user.role == "admin" or p.created_by == user.id %}
       <form method="post" action="/presets/{{ p.id }}/delete" class="inline">

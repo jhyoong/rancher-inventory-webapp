@@ -1,7 +1,9 @@
 {% extends "base.html" %}
+{% from "_csv.html" import csv_link with context %}
 {% block title %}Namespaces - Rancher inventory{% endblock %}
 {% block content %}
 <h1>Namespaces</h1>
+<p>{{ csv_link("namespaces") }}</p>
 <p>Sort by:
   <a href="/namespaces">cluster</a>
   {% for s in sorts %} | {% if s == sort %}<strong>{{ s }}</strong>{% else %}<a href="/namespaces?sort={{ s }}">{{ s }}</a>{% endif %}{% endfor %}

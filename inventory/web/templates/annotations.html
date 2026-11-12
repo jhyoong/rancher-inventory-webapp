@@ -1,7 +1,9 @@
 {% extends "base.html" %}
+{% from "_csv.html" import csv_link with context %}
 {% block title %}Annotations - Rancher inventory{% endblock %}
 {% block content %}
 <h1>Custom annotation keys</h1>
+<p>{{ csv_link("keys") }}</p>
 <table>
   <tr><th>Key</th><th>Objects</th><th>Clusters</th></tr>
   {% for k in keys %}
@@ -12,6 +14,7 @@
 </table>
 {% if objects is not none %}
 <h2>Objects with {{ key }}</h2>
+<p>{{ csv_link("objects") }}</p>
 {% if objects | length >= max_rows %}<p class="warn">Showing the first {{ max_rows }} rows.</p>{% endif %}
 <table>
   <tr><th>Site</th><th>Cluster</th><th>Kind</th><th>Namespace</th><th>Name</th><th>Value</th></tr>

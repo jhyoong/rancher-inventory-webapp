@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_csv.html" import csv_link with context %}
 {% from "_class_badge.html" import class_badge, complexity_badges, flag_badges, state %}
 {% block title %}Inventory - Rancher inventory{% endblock %}
 {% block content %}
@@ -13,6 +14,7 @@
   <label>Cluster label <input name="label" value="{{ f.label }}" placeholder="key or key=value"></label>
   <button type="submit">Filter</button>
 </form>
+<p>{{ csv_link("inventory") }}</p>
 <table>
   <tr><th>Site</th><th>Cluster</th><th>Class</th><th>Flags</th><th>Kubernetes</th><th>Nodes</th><th>StatefulSets</th>
       <th>Bound PVCs</th><th>Capacity</th><th>Helm releases</th><th>Custom CRD groups</th><th>LB services</th>

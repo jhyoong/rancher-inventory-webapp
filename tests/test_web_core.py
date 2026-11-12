@@ -189,6 +189,9 @@ def test_every_route_needs_a_session(client):
     assert "/network" in gets and "/runs" in posts  # the walk found the routers
     for path in gets:
         r = client.get(path, follow_redirects=False)
+        if path.startswith("/api/"):  # JSON API: 401, no redirect
+            assert r.status_code == 401, path
+            continue
         assert r.status_code == 303 and r.headers["location"] == "/login", path
         r = client.get(path, headers={"HX-Request": "true"}, follow_redirects=False)
         assert r.status_code == 401 and r.headers["hx-redirect"] == "/login", path

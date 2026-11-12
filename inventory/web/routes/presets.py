@@ -14,11 +14,21 @@ log = logging.getLogger("inventory.web")
 router = APIRouter()
 
 
+def _filters_or_none(text: str) -> dict | None:
+    """Stored filters, or None for corrupt JSON or filters this version does not accept."""
+    try:
+        data = json.loads(text)
+        queries.validate_filters(data)
+        return data
+    except ValueError:
+        return None
+
+
 @router.get("/presets")
 def presets_page(
     request: Request, conn: sqlite3.Connection = Depends(read_db), user: User = Depends(current_user)
 ):
-    rows = [{**dict(p), "filters": json.loads(p["filters"])} for p in queries.list_presets(conn)]
+    rows = [{**dict(p), "filters": _filters_or_none(p["filters"])} for p in queries.list_presets(conn)]
     return render(request, conn, user, "presets.html", presets=rows)
 
 
@@ -37,7 +47,7 @@ def save_preset(
         if not isinstance(data, dict):
             raise ValueError("filters must be an object")
         data = {k: str(v) for k, v in data.items() if str(v).strip()}
-        queries._where(data)  # validates keys
+        queries.validate_filters(data)
     except ValueError as e:
         raise HTTPException(400, f"bad filters: {e}") from None
     if not data:

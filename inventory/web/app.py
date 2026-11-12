@@ -17,10 +17,12 @@ from inventory.web.auth import ensure_first_admin
 from inventory.web.routes import (
     admin,
     annotations,
+    api,
     auth,
     check,
     clusters,
     crds,
+    export,
     health,
     helm,
     home,
@@ -112,7 +114,7 @@ def create_app(settings: Settings, collector: CollectorThread | None) -> FastAPI
     app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
     for module in (
         auth, home, clusters, inventory, network, helm, crds, annotations, workloads, storage, namespaces, platform,
-        runs, query, presets, check, admin, health,
+        runs, query, presets, check, admin, health, export, api,
     ):
         app.include_router(module.router)
     return app

@@ -131,7 +131,28 @@ def duration(started_at: str | None, finished_at: str | None) -> float | None:
 
 # ---- query page, presets and check ----
 
-ALLOWED_FILTERS = {"site", "cluster", "kind", "namespace", "name", "label", "image"}
+ALLOWED_FILTERS = {
+    "site", "cluster", "kind", "namespace", "name", "label", "image",
+    "annotation", "service_type", "address", "helm_chart", "crd_group", "class", "flag",
+}  # fmt: skip
+
+
+def validate_filters(filters: dict) -> None:
+    """Raise ValueError for an unknown filter key or flag value."""
+    if not isinstance(filters, dict):
+        raise ValueError("filters must be an object")
+    _where({str(k): str(v) for k, v in filters.items()})
+
+
+def _key_value(value: str, prefix: str, params: dict) -> str:
+    """Condition on <alias>.key and optional <alias>.value for "key" or "key=value"."""
+    key, sep, val = value.partition("=")
+    params[f"{prefix}_key"] = key
+    cond = f"{prefix[0]}.key = :{prefix}_key"
+    if sep:
+        params[f"{prefix}_value"] = val
+        cond += f" AND {prefix[0]}.value = :{prefix}_value"
+    return cond
 
 
 def _where(filters: dict[str, str]) -> tuple[str, dict]:
@@ -154,21 +175,55 @@ def _where(filters: dict[str, str]) -> tuple[str, dict]:
         elif key == "namespace":
             parts.append("r.namespace = :namespace")
         elif key == "name":
-            parts.append("r.name LIKE '%' || :name || '%'")
+            parts.append("r.name LIKE '%' || :name || '%' ESCAPE '\\'")
+            value = _like_escape(value)
         elif key == "image":
             parts.append(
                 "EXISTS (SELECT 1 FROM resource_images i WHERE i.resource_id = r.id"
-                " AND i.image LIKE '%' || :image || '%')"
+                " AND i.image LIKE '%' || :image || '%' ESCAPE '\\')"
             )
+            value = _like_escape(value)
         elif key == "label":
-            lkey, sep, lvalue = value.partition("=")
-            params["label_key"] = lkey
-            cond = "l.resource_id = r.id AND l.key = :label_key"
-            if sep:
-                params["label_value"] = lvalue
-                cond += " AND l.value = :label_value"
-            parts.append(f"EXISTS (SELECT 1 FROM resource_labels l WHERE {cond})")
+            cond = _key_value(value, "label", params)
+            parts.append(f"EXISTS (SELECT 1 FROM resource_labels l WHERE l.resource_id = r.id AND {cond})")
             continue
+        elif key == "annotation":
+            cond = _key_value(value, "annotation", params)
+            parts.append(f"EXISTS (SELECT 1 FROM resource_annotations a WHERE a.resource_id = r.id AND {cond})")
+            continue
+        elif key == "service_type":
+            parts.append("r.kind = 'services' AND json_extract(r.data, '$.spec.type') = :service_type")
+        elif key == "address":
+            parts.append(
+                "EXISTS (SELECT 1 FROM addresses ad WHERE ad.resource_id = r.id"
+                " AND (ad.address = :address OR ad.address LIKE :address_prefix ESCAPE '\\'))"
+            )
+            params["address_prefix"] = _like_escape(value) + "%"
+        elif key == "helm_chart":
+            chart, sep, version = value.partition("@")
+            parts.append(f"r.kind = 'helmreleases' AND {_HELM_CHART} = :helm_chart")
+            params["helm_chart"] = chart
+            if sep:
+                parts.append(f"{_HELM_VERSION} = :helm_version")
+                params["helm_version"] = version
+            continue
+        elif key == "crd_group":
+            parts.append("r.kind = 'customresourcedefinitions' AND json_extract(r.data, '$.spec.group') = :crd_group")
+        elif key == "class":
+            parts.append(
+                "EXISTS (SELECT 1 FROM cluster_profile p WHERE p.site = r.site AND p.cluster_id = r.cluster_id"
+                " AND p.class = :class)"
+            )
+        elif key == "flag":
+            if value in FLAG_COLUMNS:
+                cond = f"{FLAG_COLUMNS[value]} = 1"  # column comes from the fixed map
+            elif value in COMPLEXITY_FLAGS:
+                cond = "EXISTS (SELECT 1 FROM json_each(coalesce(p.complexity_flags, '[]')) WHERE value = :flag)"
+            else:
+                raise ValueError(f"unknown flag: {value}")
+            parts.append(
+                f"EXISTS (SELECT 1 FROM cluster_profile p WHERE p.site = r.site AND p.cluster_id = r.cluster_id AND {cond})"
+            )
         params[key] = value
     return (" AND ".join(parts) if parts else "1"), params
 

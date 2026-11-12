@@ -1,17 +1,18 @@
 {% extends "base.html" %}
+{% from "_csv.html" import csv_link with context %}
 {% block title %}Query - Rancher inventory{% endblock %}
 {% block content %}
 <h1>Query</h1>
 <form method="get" action="/query">
   {% for f in fields %}
-  <label>{{ f }} <input name="{{ f }}" value="{{ filters.get(f, '') }}"{% if f == "label" %} placeholder="key or key=value"{% endif %}></label>
+  <label>{{ f }} <input name="{{ f }}" value="{{ filters.get(f, '') }}"{% if f in placeholders %} placeholder="{{ placeholders[f] }}"{% endif %}></label>
   {% endfor %}
   <button type="submit">Run</button>
 </form>
 {% if error %}<p class="warn">{{ error }}</p>{% endif %}
 {% if rows is not none %}
   {% if capped %}<p class="warn">Showing the first {{ max_rows }} rows. Add filters to narrow the result.</p>{% endif %}
-  <p>{{ rows | length }} rows</p>
+  <p>{{ rows | length }} rows {{ csv_link("results") }}</p>
   <table>
     <tr><th>Site</th><th>Cluster</th><th>Kind</th><th>Namespace</th><th>Name</th></tr>
     {% for r in rows %}

@@ -1,7 +1,9 @@
 {% extends "base.html" %}
+{% from "_csv.html" import csv_link with context %}
 {% block title %}Helm - Rancher inventory{% endblock %}
 {% block content %}
 <h1>Helm releases</h1>
+<p>{{ csv_link("charts") }}</p>
 <table>
   <tr><th>Chart</th><th>Releases</th><th>Clusters</th><th>Versions (clusters)</th></tr>
   {% for c in charts %}
@@ -13,6 +15,7 @@
 </table>
 {% if releases is not none %}
 <h2>Releases of {{ chart }}</h2>
+<p>{{ csv_link("releases") }}</p>
 <table>
   <tr><th>Site</th><th>Cluster</th><th>Namespace</th><th>Release</th><th>Version</th><th>App version</th><th>Status</th><th>Last deployed</th></tr>
   {% for r in releases %}

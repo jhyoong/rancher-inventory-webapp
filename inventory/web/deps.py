@@ -1,6 +1,7 @@
 """Request dependencies: DB connections, current user, admin check, CSRF and page rendering."""
 
 import hmac
+import logging
 import sqlite3
 from collections.abc import Iterator
 from datetime import datetime, timezone
@@ -15,6 +16,7 @@ from inventory.web.auth import User, csrf_token, session_user
 from inventory.web.queries import header_context
 
 COOKIE = "session"
+log = logging.getLogger("inventory.web")
 
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 
@@ -53,6 +55,9 @@ def _size(b: int | None) -> str:
 
 
 templates.env.filters.update(dt=_dt, cores=_cores, gib=_gib, secs=_secs, size=_size)
+templates.env.globals["csv_url"] = lambda request, table: str(
+    request.url.include_query_params(format="csv", table=table)
+)
 
 
 def set_session_cookie(resp, token: str, settings: Settings) -> None:
@@ -69,6 +74,21 @@ def set_session_cookie(resp, token: str, settings: Settings) -> None:
 def flag_params(request: Request, allowed) -> list[str]:
     """Names from `allowed` that are set (non-empty) in the query string."""
     return [f for f in allowed if request.query_params.get(f)]
+
+
+def wants_csv(request: Request) -> bool:
+    return request.query_params.get("format") == "csv"
+
+
+def csv_download(request: Request, user: User, page: str, tables: dict[str, list], columns: dict | None = None):
+    """CSV of one page table: ?table=<name>, default the first. Each download is logged."""
+    from inventory.export.csv import csv_response
+
+    name = request.query_params.get("table") or next(iter(tables))
+    if name not in tables:
+        raise HTTPException(400, f"unknown table: {name}")
+    log.info("csv download user=%r path=%s table=%s", user.username, request.url.path, name)
+    return csv_response(tables[name] or [], f"{page}-{name}.csv", (columns or {}).get(name))
 
 
 def get_settings(request: Request) -> Settings:

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_csv.html" import csv_link with context %}
 {% block title %}Network - Rancher inventory{% endblock %}
 {% macro capped(rows) %}{% if rows | length >= max_rows %}<p class="warn">Showing the first {{ max_rows }} rows. Search for an address or prefix to narrow the result.</p>{% endif %}{% endmacro %}
 {% macro addr_table(rows, annotations=false) %}
@@ -22,15 +23,20 @@
 </form>
 {% if q %}
 <h2>Search results for {{ q }}</h2>
+<p>{{ csv_link("results") }}</p>
 {{ addr_table(results) }}
 {% endif %}
 <h2 id="lb">Load balancers</h2>
+<p>{{ csv_link("load_balancers") }}</p>
 {{ addr_table(load_balancers, true) }}
 <h2 id="ingress">Ingress hosts</h2>
+<p>{{ csv_link("ingress_hosts") }}</p>
 {{ addr_table(ingress_hosts) }}
 <h2 id="nodes">Node IPs</h2>
+<p>{{ csv_link("node_ips") }}</p>
 {{ addr_table(node_ips) }}
 <h2 id="services">NodePort and external IP services</h2>
+<p>{{ csv_link("services") }}</p>
 {{ capped(services) }}
 <table>
   <tr><th>Site</th><th>Cluster</th><th>Namespace</th><th>Name</th><th>Type</th><th>External IPs</th><th>Ports</th></tr>
@@ -42,6 +48,7 @@
   {% endfor %}
 </table>
 <h2 id="duplicates">Duplicates across clusters</h2>
+<p>{{ csv_link("duplicates") }}</p>
 {{ capped(duplicates) }}
 <table>
   <tr><th>Address</th><th>Role</th><th>Clusters</th><th>Found in</th></tr>

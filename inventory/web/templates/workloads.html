@@ -1,7 +1,9 @@
 {% extends "base.html" %}
+{% from "_csv.html" import csv_link with context %}
 {% block title %}Workloads - Rancher inventory{% endblock %}
 {% block content %}
 <h1>Workloads</h1>
+<p>{{ csv_link("workloads") }}</p>
 <form method="get" action="/workloads">
   {% for f in all_flags %}<label><input type="checkbox" name="{{ f }}" value="1" {% if f in flags %}checked{% endif %}> {{ f | replace("_", " ") }}</label> {% endfor %}
   <label>Name <input name="name" value="{{ name_filter }}"></label>

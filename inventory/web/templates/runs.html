@@ -1,7 +1,9 @@
 {% extends "base.html" %}
+{% from "_csv.html" import csv_link with context %}
 {% block title %}Runs - Rancher inventory{% endblock %}
 {% block content %}
 <h1>Runs</h1>
+<p>{{ csv_link("runs") }}</p>
 {% if message %}<p class="warn">{{ message }}</p>{% endif %}
 <table>
   <tr><th>Run</th><th>Status</th><th>Trigger</th><th>By</th><th>Started</th><th>Finished</th><th>Clusters</th></tr>

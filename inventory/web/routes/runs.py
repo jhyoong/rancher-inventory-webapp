@@ -7,7 +7,7 @@ from fastapi.responses import RedirectResponse
 from inventory.collector.runner import RunInProgress, Scope, request_cancel, retry_scope
 from inventory.web import queries
 from inventory.web.auth import User
-from inventory.web.deps import check_csrf, current_user, read_db, render, require_admin, write_db
+from inventory.web.deps import check_csrf, csv_download, current_user, read_db, render, require_admin, wants_csv, write_db
 
 log = logging.getLogger("inventory.web")
 router = APIRouter()
@@ -15,7 +15,10 @@ router = APIRouter()
 
 @router.get("/runs")
 def runs(request: Request, conn: sqlite3.Connection = Depends(read_db), user: User = Depends(current_user)):
-    return render(request, conn, user, "runs.html", runs=queries.runs(conn))
+    rows = queries.runs(conn)
+    if wants_csv(request):
+        return csv_download(request, user, "runs", {"runs": rows})
+    return render(request, conn, user, "runs.html", runs=rows)
 
 
 @router.get("/runs/progress")
@@ -31,6 +34,8 @@ def run_page(
     if run is None:
         raise HTTPException(404, "run not found")
     rows = queries.run_clusters(conn, run_id)
+    if wants_csv(request):
+        return csv_download(request, user, f"run-{run_id}", {"clusters": rows, "totals": queries.site_totals(rows)})
     return render(
         request,
         conn,
