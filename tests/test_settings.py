@@ -30,3 +30,29 @@ def test_duplicate_site_names_rejected(tmp_path, monkeypatch, settings):
 
 def test_mask_token():
     assert mask_token("token-k6lm8:secretvalue") == "token-k6lm8:****"
+
+
+@pytest.mark.parametrize("value", ["2am", "24:00", "02:60", "2:00", "02:00:00", ""])
+def test_collect_daily_at_rejected(value, monkeypatch):
+    from inventory.settings import Settings
+
+    monkeypatch.setenv("COLLECT_DAILY_AT", value)
+    with pytest.raises(ValueError, match="must be HH:MM"):
+        Settings()
+
+
+@pytest.mark.parametrize("value", ["00:00", "02:00", "23:59"])
+def test_collect_daily_at_accepted(value, monkeypatch):
+    from inventory.settings import Settings
+
+    monkeypatch.setenv("COLLECT_DAILY_AT", value)
+    assert Settings().collect_daily_at == value
+
+
+def test_cli_reports_bad_daily_at_plainly(monkeypatch, capsys):
+    from inventory.cli import main
+
+    monkeypatch.setenv("COLLECT_DAILY_AT", "2am")
+    assert main(["check-config"]) == 1
+    err = capsys.readouterr().err
+    assert err.startswith("config error: COLLECT_DAILY_AT: must be HH:MM") and "Traceback" not in err

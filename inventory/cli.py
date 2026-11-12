@@ -149,7 +149,19 @@ def _healthcheck() -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from pydantic import ValidationError
+
     args = _build_parser().parse_args(argv)
+    try:
+        return _dispatch(args)
+    except ValidationError as e:
+        for err in e.errors():
+            field = ".".join(str(part) for part in err["loc"]).upper()
+            print(f"config error: {field}: {err['msg'].removeprefix('Value error, ')}", file=sys.stderr)
+        return 1
+
+
+def _dispatch(args: argparse.Namespace) -> int:
     if args.command == "check-config":
         return _check_config()
     if args.command == "collect-once":

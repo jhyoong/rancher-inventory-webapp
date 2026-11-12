@@ -276,3 +276,28 @@ def test_metrics_error_does_not_fail_cluster(settings, db, db_path, monkeypatch)
     assert asyncio.run(execute_run(settings, rid)) == "ok"
     row = connect(db_path).execute("SELECT status FROM run_clusters WHERE run_id=?", [rid]).fetchone()
     assert row["status"] == "ok"
+
+
+def test_schedule_survives_errors(settings, monkeypatch):
+    """An error in one schedule iteration is logged and the loop keeps going."""
+    from inventory.collector import thread as thread_mod
+    from inventory.collector.thread import CollectorThread
+
+    t = CollectorThread(settings)
+    calls = []
+    monkeypatch.setattr(t, "_is_stale", lambda: False)
+    monkeypatch.setattr(thread_mod, "RETRY_SLEEP_S", 0.01)
+
+    def bad_next_start(now, at):
+        calls.append(1)
+        if len(calls) >= 3:
+            t._stop_flag.set()
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(thread_mod, "next_start", bad_next_start)
+
+    async def go():
+        await asyncio.wait_for(t._schedule(), timeout=5)
+
+    asyncio.run(go())
+    assert len(calls) == 3

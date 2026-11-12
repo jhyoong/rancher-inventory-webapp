@@ -1,4 +1,5 @@
 import os
+import re
 from datetime import date
 from pathlib import Path
 
@@ -29,6 +30,13 @@ class Settings(BaseSettings):
     data_dir: Path = Path("/data")
     sites_file: Path = Path("/config/sites.yaml")
     defaults_dir: Path = Path("/app/defaults")
+
+    @field_validator("collect_daily_at")
+    @classmethod
+    def _check_daily_at(cls, v: str) -> str:
+        if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", v):
+            raise ValueError(f"must be HH:MM in 24-hour time (00:00 to 23:59), got {v!r}")
+        return v
 
     @property
     def db_path(self) -> Path:

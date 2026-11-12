@@ -18,6 +18,8 @@ from inventory.settings import Settings
 
 log = logging.getLogger(__name__)
 
+RETRY_SLEEP_S = 60  # wait after an error in the schedule loop before trying again
+
 
 def next_start(now: datetime, at: str) -> datetime:
     """Next time of day `at` ("HH:MM") strictly after `now`."""
@@ -123,11 +125,18 @@ class CollectorThread(threading.Thread):
         return datetime.now(timezone.utc) - when > timedelta(hours=self.settings.stale_after_hours)
 
     async def _schedule(self) -> None:
-        if self._is_stale():
-            self._start_scheduled("startup")
+        try:
+            if self._is_stale():
+                self._start_scheduled("startup")
+        except Exception:
+            log.exception("startup staleness check failed")
         while not self._stop_flag.is_set():
-            target = next_start(datetime.now(), self.settings.collect_daily_at)
-            # Sleep in short steps so clock changes do not delay the start much.
-            while (remaining := (target - datetime.now()).total_seconds()) > 0:
-                await asyncio.sleep(min(remaining, 60))
-            self._start_scheduled(None)
+            try:
+                target = next_start(datetime.now(), self.settings.collect_daily_at)
+                # Sleep in short steps so clock changes do not delay the start much.
+                while (remaining := (target - datetime.now()).total_seconds()) > 0:
+                    await asyncio.sleep(min(remaining, 60))
+                self._start_scheduled(None)
+            except Exception:
+                log.exception("schedule loop error, retrying in %s s", RETRY_SLEEP_S)
+                await asyncio.sleep(RETRY_SLEEP_S)
