@@ -137,3 +137,18 @@ def test_failed_marker(failed_clients, path):
     assert "last collection failed" in a and "last collection failed" in v
     assert "boom-unreachable-xyz" in a
     assert "boom-unreachable-xyz" not in v
+
+
+def test_network_lists_are_capped(admin_client_collected, monkeypatch):
+    """Each /network list stops at NETWORK_LIMIT rows and says so."""
+    conn = connect(admin_client_collected.app.state.settings.db_path, readonly=True)
+    try:
+        assert len(queries.node_ips(conn)) == 3
+        assert len(queries.node_ips(conn, limit=1)) == 1
+        assert len(queries.search_addresses(conn, "1", limit=2)) == 2
+    finally:
+        conn.close()
+    note = "Showing the first 1 rows."
+    assert note not in admin_client_collected.get("/network").text
+    monkeypatch.setattr(queries, "NETWORK_LIMIT", 1)
+    assert note in admin_client_collected.get("/network").text

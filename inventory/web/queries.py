@@ -330,7 +330,10 @@ def _like_escape(q: str) -> str:
     return q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-def search_addresses(conn, q: str) -> list[dict]:
+NETWORK_LIMIT = 5000  # rows per /network list, like the /query cap
+
+
+def search_addresses(conn, q: str, limit: int = NETWORK_LIMIT) -> list[dict]:
     q = q.strip()
     if not q:
         return []
@@ -341,8 +344,9 @@ def search_addresses(conn, q: str) -> list[dict]:
            JOIN resources r ON r.id = a.resource_id
            JOIN clusters  c ON c.site = r.site AND c.cluster_id = r.cluster_id
            WHERE a.address = :q OR a.address LIKE :like ESCAPE '\\'
-           ORDER BY r.site, c.name, r.kind, r.namespace, r.name, a.address""",
-        {"q": q, "like": _like_escape(q) + "%"},
+           ORDER BY r.site, c.name, r.kind, r.namespace, r.name, a.address
+           LIMIT :limit""",
+        {"q": q, "like": _like_escape(q) + "%", "limit": limit},
     ).fetchall()
     return [dict(r) for r in rows]
 
@@ -355,32 +359,34 @@ JOIN resources r ON r.id = a.resource_id
 JOIN clusters c ON c.site = r.site AND c.cluster_id = r.cluster_id
 WHERE {where}
 ORDER BY r.site, c.name, a.address, r.namespace, r.name
+LIMIT ?
 """
 
 
-def _addr_rows(conn, where: str, extra: str = "", params: tuple = ()) -> list[dict]:
+def _addr_rows(conn, where: str, limit: int, extra: str = "") -> list[dict]:
     sql = _ADDR_SQL.format(where=where, extra=extra)
-    return [dict(r) for r in conn.execute(sql, params).fetchall()]
+    return [dict(r) for r in conn.execute(sql, (limit,)).fetchall()]
 
 
-def load_balancers(conn) -> list[dict]:
+def load_balancers(conn, limit: int = NETWORK_LIMIT) -> list[dict]:
     return _addr_rows(
         conn,
         "a.role IN ('lb', 'ingress-lb')",
+        limit,
         extra=""", (SELECT group_concat(an.key || '=' || an.value, char(10))
                     FROM resource_annotations an WHERE an.resource_id = r.id) AS annotations""",
     )
 
 
-def ingress_hosts(conn) -> list[dict]:
-    return _addr_rows(conn, "a.role = 'ingress-host'")
+def ingress_hosts(conn, limit: int = NETWORK_LIMIT) -> list[dict]:
+    return _addr_rows(conn, "a.role = 'ingress-host'", limit)
 
 
-def node_ips(conn) -> list[dict]:
-    return _addr_rows(conn, "a.role IN ('node-internal', 'node-external')")
+def node_ips(conn, limit: int = NETWORK_LIMIT) -> list[dict]:
+    return _addr_rows(conn, "a.role IN ('node-internal', 'node-external')", limit)
 
 
-def nodeport_and_external_services(conn) -> list[dict]:
+def nodeport_and_external_services(conn, limit: int = NETWORK_LIMIT) -> list[dict]:
     rows = conn.execute(
         """SELECT r.site, c.name AS cluster, r.cluster_id, r.namespace, r.name,
                   json_extract(r.data, '$.spec.type') AS type,
@@ -394,12 +400,14 @@ def nodeport_and_external_services(conn) -> list[dict]:
            WHERE r.kind = 'services'
              AND (json_extract(r.data, '$.spec.type') = 'NodePort'
                   OR EXISTS (SELECT 1 FROM addresses a WHERE a.resource_id = r.id AND a.role = 'external-ip'))
-           ORDER BY r.site, c.name, r.namespace, r.name"""
+           ORDER BY r.site, c.name, r.namespace, r.name
+           LIMIT ?""",
+        (limit,),
     ).fetchall()
     return [dict(r) for r in rows]
 
 
-def duplicate_addresses(conn) -> list[dict]:
+def duplicate_addresses(conn, limit: int = NETWORK_LIMIT) -> list[dict]:
     """An lb, ingress-lb or ingress-host address found in more than one cluster, any role mix."""
     rows = conn.execute(
         """SELECT lower(a.address) AS address, group_concat(DISTINCT a.role) AS role,
@@ -411,7 +419,9 @@ def duplicate_addresses(conn) -> list[dict]:
            WHERE a.role IN ('lb', 'ingress-lb', 'ingress-host')
            GROUP BY lower(a.address)
            HAVING clusters > 1
-           ORDER BY address"""
+           ORDER BY address
+           LIMIT ?""",
+        (limit,),
     ).fetchall()
     return [dict(r) for r in rows]
 
