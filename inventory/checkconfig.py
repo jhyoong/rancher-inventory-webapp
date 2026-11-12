@@ -12,7 +12,7 @@ from inventory.settings import ConfigError, Settings, Site, load_sites, mask_tok
 class SiteCheck:
     site: Site
     reachable: bool = False
-    tls: str = "verified"
+    tls: str = "unknown"
     user: str | None = None
     token_days_left: int | None = None
     clusters: int | None = None
@@ -23,7 +23,7 @@ class SiteCheck:
 
     @property
     def ok(self) -> bool:
-        return self.reachable and self.user is not None
+        return self.reachable and self.user is not None and self.sample_cluster is not None
 
 
 def _is_tls_error(e: RancherError) -> bool:
@@ -37,6 +37,14 @@ def _is_tls_error(e: RancherError) -> bool:
 
 async def _check_site(site: Site, settings: Settings, kinds) -> SiteCheck:
     check = SiteCheck(site=site)
+    try:
+        await _run_checks(check, site, settings, kinds)
+    except Exception as e:  # one bad site must not hide the others
+        check.errors.append(f"unexpected failure: {type(e).__name__}")
+    return check
+
+
+async def _run_checks(check: SiteCheck, site: Site, settings: Settings, kinds) -> None:
     if site.token_expires:
         check.token_days_left = (site.token_expires - date.today()).days
     if not site.tls_verify:
@@ -45,26 +53,30 @@ async def _check_site(site: Site, settings: Settings, kinds) -> SiteCheck:
         token = site_token(site)
     except ConfigError as e:
         check.errors.append(str(e))
-        return check
+        return
     check.token_masked = mask_token(token)
     async with RancherClient(site, token, settings.request_timeout_s) as client:
         try:
             check.user = await client.whoami()
             check.reachable = True
+            if site.tls_verify:
+                check.tls = "verified"
         except RancherError as e:
             if e.status is None:
                 if _is_tls_error(e):
                     check.tls = f"error: {e}"
                 check.errors.append(str(e))
-                return check
+                return
             check.reachable = True
+            if site.tls_verify:
+                check.tls = "verified"
             check.errors.append(f"token not accepted: {e}")
-            return check
+            return
         try:
             clusters = await client.list_clusters()
         except RancherError as e:
             check.errors.append(f"cannot list clusters: {e}")
-            return check
+            return
         check.clusters = len(clusters)
         active = [c for c in clusters if c.get("state") == "active"]
         sample = next((c for c in active if c.get("id") == "local"), None)
@@ -72,7 +84,7 @@ async def _check_site(site: Site, settings: Settings, kinds) -> SiteCheck:
             sample = active[0]
         if sample is None:
             check.errors.append("no active cluster to sample")
-            return check
+            return
         cid = sample["id"]
         check.sample_cluster = cid
 
@@ -87,7 +99,6 @@ async def _check_site(site: Site, settings: Settings, kinds) -> SiteCheck:
                     check.kinds[name] = e.status
 
         await asyncio.gather(*(probe(k.name, k.path) for k in kinds.values()))
-    return check
 
 
 async def check_config(settings: Settings) -> list[SiteCheck]:

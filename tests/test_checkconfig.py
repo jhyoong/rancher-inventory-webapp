@@ -27,3 +27,32 @@ def test_report_masks_token(settings):
 def test_cli_check_config_exit_code_bad_token(monkeypatch):
     monkeypatch.setenv("RANCHER_DEV_TOKEN", "token-bad00:nope")
     assert main(["check-config"]) == 1
+
+
+def _sites_file(tmp_path, monkeypatch, url, tls_verify):
+    f = tmp_path / "sites.yaml"
+    f.write_text(
+        "sites:\n"
+        "  - name: t\n"
+        f"    url: {url}\n"
+        "    token_env: RANCHER_DEV_TOKEN\n"
+        f"    tls_verify: {str(tls_verify).lower()}\n"
+    )
+    monkeypatch.setenv("SITES_FILE", str(f))
+
+
+@pytest.mark.live
+def test_tls_verify_fails_on_placeholder_cert(settings, tmp_path, monkeypatch):
+    _sites_file(tmp_path, monkeypatch, "https://rancher.local", True)
+    [c] = asyncio.run(check_config(type(settings)()))
+    assert c.tls.startswith("error")
+    assert not c.reachable
+
+
+def test_unreachable_url_tls_unknown(settings, tmp_path, monkeypatch):
+    monkeypatch.setenv("RANCHER_DEV_TOKEN", "token-x:y")
+    _sites_file(tmp_path, monkeypatch, "https://127.0.0.1:1", True)
+    [c] = asyncio.run(check_config(type(settings)()))
+    assert c.tls == "unknown"
+    assert not c.reachable
+    assert main(["check-config"]) == 1
