@@ -61,10 +61,10 @@ def users_action(
         elif action == "reset":
             auth.set_password(conn, username, password)
             message = f"Password reset for {username}"
-            if auth.normalize_username(username) == user.username:
+            if auth.normalize_username(username) == user.username.lower():
                 return _own_reset(request, conn, user, password)
         elif action in ("disable", "enable"):
-            if action == "disable" and username == user.username:
+            if action == "disable" and auth.normalize_username(username) == user.username.lower():
                 raise ValueError("you cannot disable your own account")
             auth.set_disabled(conn, username, action == "disable")
             message = f"{username} {action}d"

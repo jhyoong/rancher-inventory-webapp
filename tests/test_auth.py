@@ -218,3 +218,13 @@ def test_login_log_uses_repr(client, caplog):
     with caplog.at_level(logging.WARNING, logger="inventory.web"):
         client.post("/login", data={"username": "evil\nINFO fake", "password": "wrong-password-x"})
     assert "'evil\\ninfo fake'" in caplog.text
+
+
+def test_mixed_case_user_from_plan_1_can_still_log_in(db):
+    """Plan 1 stored usernames as typed; login now lower-cases the input."""
+    create_user(db, "tmp", "right-password-1", "admin")
+    db.execute("UPDATE users SET username='Admin' WHERE username='tmp'")  # a plan 1 row
+    assert login(db, "Admin", "right-password-1", 12, NOW)
+    assert login(db, "admin", "right-password-1", 12, NOW)
+    set_password(db, "ADMIN", "right-password-2")
+    assert login(db, "admin", "right-password-2", 12, NOW)

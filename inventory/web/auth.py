@@ -88,7 +88,8 @@ def create_user(conn, username: str, password: str, role: str) -> User:
 
 def _require_user(conn, username: str) -> int:
     username = normalize_username(username)
-    row = conn.execute("SELECT id FROM users WHERE username=?", (username,)).fetchone()
+    # lower(): plan 1 stored usernames as typed
+    row = conn.execute("SELECT id FROM users WHERE lower(username)=? ORDER BY id LIMIT 1", (username,)).fetchone()
     if row is None:
         raise ValueError(f"unknown user {username}")
     return row["id"]
@@ -148,7 +149,7 @@ def login(conn, username: str, password: str, hours: int, now: datetime) -> str 
     if _recent_failures(conn, username, since) >= LOCK_FAILURES:
         raise LoginLocked(username)
     row = conn.execute(
-        "SELECT id, password_hash, disabled FROM users WHERE username=?", (username,)
+        "SELECT id, password_hash, disabled FROM users WHERE lower(username)=? ORDER BY id LIMIT 1", (username,)
     ).fetchone()
     # Always run one scrypt verify so unknown users cost the same time.
     ok = verify_password(password, row["password_hash"] if row else _DUMMY_HASH)
