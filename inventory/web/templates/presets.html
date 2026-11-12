@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Presets - Rancher inventory{% endblock %}
+{% block content %}
+<h1>Presets</h1>
+<table>
+  <tr><th>Name</th><th>Filters</th><th>Created by</th><th>Created</th><th></th></tr>
+  {% for p in presets %}
+  <tr>
+    <td>{{ p.name }}</td>
+    <td>{% for k, v in p.filters.items() %}{{ k }}={{ v }}{% if not loop.last %}, {% endif %}{% endfor %}</td>
+    <td>{{ p.creator or "-" }}</td>
+    <td>{{ p.created_at | dt }}</td>
+    <td>
+      <a href="/query?{{ p.filters | urlencode }}">Run</a>
+      <a href="/check?preset={{ p.id }}">Check</a>
+      {% if user.role == "admin" or p.created_by == user.id %}
+      <form method="post" action="/presets/{{ p.id }}/delete" class="inline">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button type="submit">Delete</button>
+      </form>
+      {% endif %}
+    </td>
+  </tr>
+  {% else %}
+  <tr><td colspan="5">No presets yet. Save one from the <a href="/query">query page</a>.</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}

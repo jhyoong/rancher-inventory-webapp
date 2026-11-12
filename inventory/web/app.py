@@ -12,7 +12,7 @@ from inventory.db.connection import connect
 from inventory.db.migrate import migrate
 from inventory.settings import Settings
 from inventory.web.auth import ensure_first_admin
-from inventory.web.routes import admin, auth, clusters, health, home, runs
+from inventory.web.routes import admin, auth, check, clusters, health, home, presets, query, runs
 
 log = logging.getLogger("inventory.web")
 
@@ -43,6 +43,6 @@ def create_app(settings: Settings, collector: CollectorThread | None) -> FastAPI
     app.state.settings = settings
     app.state.collector = collector
     app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
-    for module in (auth, home, clusters, runs, admin, health):
+    for module in (auth, home, clusters, runs, query, presets, check, admin, health):
         app.include_router(module.router)
     return app

@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Query - Rancher inventory{% endblock %}
+{% block content %}
+<h1>Query</h1>
+<form method="get" action="/query">
+  {% for f in fields %}
+  <label>{{ f }} <input name="{{ f }}" value="{{ filters.get(f, '') }}"{% if f == "label" %} placeholder="key or key=value"{% endif %}></label>
+  {% endfor %}
+  <button type="submit">Run</button>
+</form>
+{% if error %}<p class="warn">{{ error }}</p>{% endif %}
+{% if rows is not none %}
+  {% if capped %}<p class="warn">Showing the first {{ max_rows }} rows. Add filters to narrow the result.</p>{% endif %}
+  <p>{{ rows | length }} rows</p>
+  <table>
+    <tr><th>Site</th><th>Cluster</th><th>Kind</th><th>Namespace</th><th>Name</th></tr>
+    {% for r in rows %}
+    <tr><td>{{ r.site }}</td><td>{{ r.cluster_name or r.cluster_id }}</td><td>{{ r.kind }}</td><td>{{ r.namespace or "-" }}</td><td>{{ r.name }}</td></tr>
+    {% else %}
+    <tr><td colspan="5">No matches.</td></tr>
+    {% endfor %}
+  </table>
+  <h2>Save as preset</h2>
+  <form method="post" action="/presets">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="filters" value="{{ filters | tojson | forceescape }}">
+    <label>Name <input name="name" required></label>
+    <button type="submit">Save preset</button>
+  </form>
+{% endif %}
+{% endblock %}

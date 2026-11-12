@@ -121,3 +121,114 @@ def duration(started_at: str | None, finished_at: str | None) -> float | None:
     if start is None or end is None:
         return None
     return (end - start).total_seconds()
+
+
+# ---- query page, presets and check ----
+
+ALLOWED_FILTERS = {"site", "cluster", "kind", "namespace", "name", "label", "image"}
+
+
+def _where(filters: dict[str, str]) -> tuple[str, dict]:
+    """WHERE clause over resources r and clusters c. Values are only named parameters."""
+    bad = set(filters) - ALLOWED_FILTERS
+    if bad:
+        raise ValueError(f"unknown filter: {', '.join(sorted(bad))}")
+    parts: list[str] = []
+    params: dict = {}
+    for key, value in filters.items():
+        if value is None or str(value).strip() == "":
+            continue
+        value = str(value).strip()
+        if key == "site":
+            parts.append("r.site = :site")
+        elif key == "cluster":
+            parts.append("(r.cluster_id = :cluster OR c.name = :cluster)")
+        elif key == "kind":
+            parts.append("r.kind = :kind")
+        elif key == "namespace":
+            parts.append("r.namespace = :namespace")
+        elif key == "name":
+            parts.append("r.name LIKE '%' || :name || '%'")
+        elif key == "image":
+            parts.append(
+                "EXISTS (SELECT 1 FROM resource_images i WHERE i.resource_id = r.id"
+                " AND i.image LIKE '%' || :image || '%')"
+            )
+        elif key == "label":
+            lkey, sep, lvalue = value.partition("=")
+            params["label_key"] = lkey
+            cond = "l.resource_id = r.id AND l.key = :label_key"
+            if sep:
+                params["label_value"] = lvalue
+                cond += " AND l.value = :label_value"
+            parts.append(f"EXISTS (SELECT 1 FROM resource_labels l WHERE {cond})")
+            continue
+        params[key] = value
+    return (" AND ".join(parts) if parts else "1"), params
+
+
+_FROM = " FROM resources r LEFT JOIN clusters c ON c.site = r.site AND c.cluster_id = r.cluster_id"
+
+
+def build_query(filters: dict[str, str]) -> tuple[str, dict]:
+    where, params = _where(filters)
+    sql = (
+        "SELECT r.site, r.cluster_id, c.name AS cluster_name, r.kind, r.namespace, r.name"
+        + _FROM
+        + f" WHERE {where} ORDER BY r.site, r.cluster_id, r.kind, r.namespace, r.name"
+    )
+    return sql, params
+
+
+def list_presets(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT p.id, p.name, p.filters, p.created_at, p.created_by, u.username AS creator"
+        " FROM presets p LEFT JOIN users u ON u.id = p.created_by ORDER BY p.name"
+    ).fetchall()
+
+
+def get_preset(conn: sqlite3.Connection, preset_id: int) -> sqlite3.Row | None:
+    return conn.execute("SELECT * FROM presets WHERE id=?", (preset_id,)).fetchone()
+
+
+def check_preset(conn: sqlite3.Connection, preset_id: int) -> list[dict]:
+    """One row per cluster: present, absent or unknown."""
+    import json
+
+    preset = get_preset(conn, preset_id)
+    if preset is None:
+        raise ValueError("preset not found")
+    filters = json.loads(preset["filters"])
+    where, params = _where(filters)
+    found = {
+        (r[0], r[1])
+        for r in conn.execute("SELECT DISTINCT r.site, r.cluster_id" + _FROM + f" WHERE {where}", params)
+    }
+    kind = (filters.get("kind") or "").strip()
+    out = []
+    for c in conn.execute("SELECT site, cluster_id, name, last_ok_run FROM clusters ORDER BY site, name"):
+        site, cid = c["site"], c["cluster_id"]
+        latest = conn.execute(
+            "SELECT status FROM run_clusters WHERE site=? AND cluster_id=? ORDER BY run_id DESC LIMIT 1",
+            (site, cid),
+        ).fetchone()
+        reason = None
+        if c["last_ok_run"] is None:
+            reason = "never collected"
+        elif latest is not None and latest["status"] == "failed":
+            reason = "latest run failed"
+        elif kind:
+            k = conn.execute(
+                "SELECT status FROM run_kinds WHERE run_id=? AND site=? AND cluster_id=? AND kind=?",
+                (c["last_ok_run"], site, cid, kind),
+            ).fetchone()
+            if k is None or k["status"] != "ok":
+                reason = f"kind {kind} was not collected"
+        if reason:
+            result = "unknown"
+        else:
+            result = "present" if (site, cid) in found else "absent"
+        out.append(
+            {"site": site, "cluster_id": cid, "name": c["name"], "result": result, "reason": reason}
+        )
+    return out
