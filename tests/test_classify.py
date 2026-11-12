@@ -120,9 +120,12 @@ def _expected(dev_lists, rules):
 
 
 @pytest.mark.live
-def test_local_profile(collected_db, rules, dev_lists, open_db):
+def test_local_profile(collected_db, rules, dev_lists, open_db, tmp_path):
+    import shutil
+
     flags, users, groups, all_ns = _expected(dev_lists, rules)
-    conn = open_db(collected_db.db_path)
+    shutil.copy(collected_db.db_path, tmp_path / "inventory.db")  # build_profiles below rewrites rows
+    conn = open_db(tmp_path / "inventory.db")
     try:
         def snapshot():
             cp = dict(conn.execute("SELECT * FROM cluster_profile WHERE cluster_id='local'").fetchone())
