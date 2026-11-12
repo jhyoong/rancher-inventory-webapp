@@ -70,4 +70,5 @@ def test_pod_unparseable_quantity_does_not_raise(settings):
         {"resources": {"requests": {"cpu": "bogus", "memory": "64Mi"}}},
     ]}}  # fmt: skip
     d = trim(load_kinds(settings)["pods"], pod).data
-    assert d["cpu_req_m"] == 1000100 and d["mem_req_b"] == 1000 + 64 * 2**20
+    # "bogus" cpu is skipped; the milli memory value parses to 128974848 bytes
+    assert d["cpu_req_m"] == 1000100 and d["mem_req_b"] == 128974848 + 1000 + 64 * 2**20
