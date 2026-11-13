@@ -112,7 +112,8 @@ def floating_ips(
 
     for key, entry in result.items():
         src = entry.pop("_sources")
-        lb = src.get("lb", set())
+        # status.loadBalancer.ingress (stored as lb addresses) plus pinned spec.loadBalancerIP
+        lb = src.get("lb", set()) | {a for s in services.get(key, []) for a in s["addresses"]}
         ingress = src.get("ingress-lb", set()) - lb
         external = src.get("external-ip", set())
         node = src.get("node-external", set())

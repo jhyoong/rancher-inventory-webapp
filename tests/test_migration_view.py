@@ -93,3 +93,31 @@ def test_service_signals_from_real_copy(dev_lists, settings):
         load_rules(settings),
     )
     assert signals == ["pinned-ip", "local-traffic-policy", "shared-ip"]
+
+
+@pytest.mark.live
+def test_pinned_load_balancer_ip_counted(collected_db, tmp_path, open_db, settings):
+    copy = tmp_path / "copy.db"
+    shutil.copy(collected_db.db_path, copy)
+    conn = open_db(copy)
+    rules = load_rules(settings)
+    before = floating_ips(conn, rules)[("dev", "local")]
+    # dev has no LoadBalancer service: turn a real service into one on the copy
+    service_id = conn.execute("SELECT id FROM resources WHERE kind='services' AND cluster_id='local' ORDER BY id").fetchone()[0]
+    conn.execute("UPDATE resources SET data = json_set(data, '$.spec.type', 'LoadBalancer') WHERE id = ?", (service_id,))
+
+    def pin(address):
+        conn.execute("UPDATE resources SET data = json_set(data, '$.spec.loadBalancerIP', ?) WHERE id = ?", (address, service_id))
+        conn.commit()
+        return floating_ips(conn, rules)[("dev", "local")]
+
+    new = pin("10.255.255.254")
+    assert new["lb"] == before["lb"] + 1
+    assert new["total"] == before["total"] + 1
+    assert "10.255.255.254" in new["addresses"]
+
+    existing = conn.execute(
+        "SELECT a.address FROM addresses a JOIN resources r ON r.id = a.resource_id"
+        " WHERE r.cluster_id='local' AND a.role='ingress-lb'"
+    ).fetchone()[0]
+    assert pin(existing)["total"] == before["total"]
