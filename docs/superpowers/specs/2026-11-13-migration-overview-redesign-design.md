@@ -62,7 +62,7 @@ Platform engineers who carry out the migration. When they plan a batch of cluste
 
 ### 1. Data fixes and additions (do first)
 
-**1a. Node OS, kernel, runtime not stored.** `config/defaults/kinds.yaml` keeps `status.nodeInfo.osImage`, `kernelVersion`, `containerRuntimeVersion` and `architecture` for nodes, and `transform.py` derives `ready`, `taints` and `provider`. The node rows in `dev/data/inventory.db` (run 7) have only `kubeletVersion` and `roles`. Find the cause (likely an older image wrote them, or a bug in the keep path), fix it, and add a test that a node object round-trips these fields into `resources.data`.
+**1a. Node OS, kernel, runtime (checked, no bug).** The node rows in `dev/data/inventory.db` lack `osImage` and the other fields because the last dev run (13:47 UTC, Nov 12) came before commit `11fc163` (15:56 UTC) added them to `kinds.yaml`. The current code stores them (checked against the live dev nodes on Nov 13). Only a test is needed that a collected node keeps these fields.
 
 **1b. Provisioning cluster reader (new).** No code reads `provisioning.cattle.io/v1` clusters today; `cluster_profile.network` is always NULL, though the README says CNI and CIDRs come from there. Add one reader per site that lists these objects from the Rancher local cluster and stores, per downstream cluster:
 
