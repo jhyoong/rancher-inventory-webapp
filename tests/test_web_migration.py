@@ -231,3 +231,8 @@ def test_nav_links(admin_client_collected):
     assert "Tools" in nav
     for href in ("/helm", "/crds", "/annotations", "/namespaces", "/inventory"):
         assert f'href="{href}"' not in text, href
+
+
+def test_tables_js_served(admin_client_collected):
+    assert admin_client_collected.get("/static/tables.js").status_code == 200
+    assert '<script src="/static/tables.js"' in admin_client_collected.get("/").text

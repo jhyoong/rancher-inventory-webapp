@@ -1,17 +1,24 @@
 body { font-family: system-ui, sans-serif; margin: 0; color: #222; background: #fafafa; }
 header { background: #fff; border-bottom: 1px solid #ddd; padding: 0.5rem 1rem; }
-nav { display: flex; gap: 1rem; align-items: center; }
+nav { display: flex; gap: 0.9rem; align-items: center; white-space: nowrap; }
 nav .spacer { flex: 1; }
 .status { display: flex; gap: 1rem; align-items: center; margin-top: 0.4rem; font-size: 0.9rem; }
 main { padding: 1rem; }
 a { color: #24569b; }
 table { border-collapse: collapse; background: #fff; margin-bottom: 1rem; }
-th, td { border: 1px solid #ddd; padding: 0.3rem 0.6rem; text-align: left; vertical-align: top; }
-th { background: #f0f0f0; }
+th, td { border: 1px solid #ddd; padding: 0.4rem 0.7rem; text-align: left; vertical-align: top; }
+th { background: #f0f0f0; position: sticky; top: 0; z-index: 1; }
+th.sortable { cursor: pointer; user-select: none; }
+th[aria-sort=ascending]::after { content: " \25B2"; font-size: 0.7em; }
+th[aria-sort=descending]::after { content: " \25BC"; font-size: 0.7em; }
+tr:nth-child(even) > td { background: #f7f8fa; }
+.table-filter { display: block; margin-bottom: 0.4rem; padding: 0.25rem 0.5rem; min-width: 16rem; }
+.facts th { position: static; }
 td.r { text-align: right; }
 .facts th { width: 16rem; }
 .muted { color: #666; font-weight: normal; }
 .warn { color: #8a5a00; background: #fff4d6; padding: 0.1rem 0.4rem; }
+.badge.watch, .badge.hostpath { background: #fff4d6; color: #8a5a00; }
 .error, .s-failed, .s-interrupted { color: #a12020; }
 .ok, .s-ok { color: #23703a; }
 .s-partial, .s-cancelled { color: #8a5a00; }
@@ -35,3 +42,9 @@ pre.cell { margin: 0; font-size: 0.8rem; white-space: pre-wrap; }
 nav details.tools { position: relative; }
 nav details.tools summary { cursor: pointer; color: #24569b; }
 nav details.tools div { position: absolute; z-index: 1; background: #fff; border: 1px solid #ddd; padding: 0.4rem 0.8rem; display: flex; flex-direction: column; gap: 0.3rem; }
+nav details.tools div { box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12); white-space: nowrap; }
+.cluster-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr)); gap: 1rem; margin-bottom: 1rem; }
+.cluster-cards .card h3 { margin: 0 0 0.5rem; }
+.cluster-cards dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.2rem 0.8rem; margin: 0; }
+.cluster-cards dt { color: #666; }
+.cluster-cards dd { margin: 0; }
