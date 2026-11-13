@@ -415,6 +415,59 @@ def cluster_rows(
     return rows
 
 
+def site_overview(conn: sqlite3.Connection, rules: Rules, site: str | None = None) -> dict:
+    """Totals and chart data for the overview page, for one site or all sites."""
+    rows = cluster_rows(conn, rules, site=site)
+    r_where, r_args = _scope(site, None, "r")
+    os_images = [
+        {"os": r["os"], "nodes": r["nodes"]}
+        for r in conn.execute(
+            f"""SELECT COALESCE(json_extract(r.data, '$.status.nodeInfo.osImage'), 'not collected') AS os,
+                       COUNT(*) AS nodes
+                FROM resources r WHERE r.kind = 'nodes'{r_where} GROUP BY os ORDER BY nodes DESC, os""",
+            r_args,
+        )
+    ]
+    pv_by_class: dict[str, dict] = {}
+    for v in conn.execute(
+        f"""SELECT COALESCE(json_extract(r.data, '$.spec.storageClassName'), 'none') AS storage_class,
+                   json_extract(r.data, '$.spec.capacity.storage') AS size
+            FROM resources r WHERE r.kind = 'persistentvolumes'{r_where}""",
+        r_args,
+    ):
+        c = pv_by_class.setdefault(v["storage_class"], {"storage_class": v["storage_class"], "pv_count": 0, "bytes": 0})
+        c["pv_count"] += 1
+        c["bytes"] += parse_bytes(v["size"]) if v["size"] else 0
+    sources = ("lb", "external_ip", "ingress_lb", "node_external")
+    return {
+        "totals": {
+            "clusters": len(rows),
+            "nodes": sum(o["nodes"] for o in os_images),
+            "cpu_alloc_m": sum(r["cpu_alloc_m"] or 0 for r in rows),
+            "mem_alloc_b": sum(r["mem_alloc_b"] or 0 for r in rows),
+            "pv_count": sum(r["pv_count"] for r in rows),
+            "pv_bytes": sum(r["pv_bytes"] for r in rows),
+            "floating_ips": sum(r["floating"]["total"] for r in rows),
+            "special_network_clusters": sum(1 for r in rows if "special-network-config" in r["flags"]),
+        },
+        "charts": {
+            "os_images": os_images,
+            "capacity": [
+                {"cluster": r["name"], **{k: r[k] for k in (
+                    "cpu_alloc_m", "cpu_req_m", "cpu_used_m", "mem_alloc_b", "mem_req_b", "mem_used_b")}}
+                for r in rows
+            ],
+            "pv_by_class": sorted(pv_by_class.values(), key=lambda c: (-c["pv_count"], c["storage_class"])),
+            "floating": [
+                {"cluster": r["name"], **{k: r["floating"][k] for k in sources},
+                 "control_plane": 1 if r["floating"]["control_plane"] else 0}
+                for r in rows
+            ],
+        },
+        "clusters": rows,
+    }  # fmt: skip
+
+
 def flat_row(row: dict) -> dict:
     """One CSV row: lists joined with "; ", floating IPs as a total plus one column per source."""
     out = {}

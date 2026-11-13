@@ -6,7 +6,7 @@ import shutil
 import pytest
 
 from inventory.collector.rules import load_rules
-from inventory.web.migration import floating_ips, watch_out
+from inventory.web.migration import floating_ips, site_overview, watch_out
 
 pytestmark = pytest.mark.live
 
@@ -106,3 +106,29 @@ def test_clusters_csv(admin_client_collected):
     # the old Inventory CSV link still returns the cluster table
     old = get("/inventory?format=csv&table=inventory")
     assert old.status_code == 200 and "node-pinned-pv" in old.text
+
+
+def test_site_overview_dev(collected_db, open_db, settings, dev_lists):
+    conn = open_db(collected_db.db_path, readonly=True)
+    rules = load_rules(settings)
+    o = site_overview(conn, rules)
+    t, charts = o["totals"], o["charts"]
+    assert t["nodes"] == len(dev_lists["nodes"])
+    assert t["pv_count"] == len(dev_lists["persistentvolumes"])
+    assert sum(x["nodes"] for x in charts["os_images"]) == t["nodes"]
+    assert sum(x["pv_count"] for x in charts["pv_by_class"]) == t["pv_count"]
+    assert t["floating_ips"] == floating_ips(conn, rules)[("dev", "local")]["total"]
+    assert [c["cluster"] for c in charts["floating"]] == [r["name"] for r in o["clusters"]]
+    assert site_overview(conn, rules, site="other")["totals"]["clusters"] == 0
+
+
+def test_home_page(admin_client_collected):
+    text = admin_client_collected.get("/").text
+    for part in ('id="overview-data"', "/static/overview.js", "Floating IP", "Opt-in collectors:", "/clusters/dev/local"):
+        assert part in text, part
+    assert "Clusters per class" not in text
+    assert admin_client_collected.get("/?site=dev").status_code == 200
+    other = admin_client_collected.get("/?site=other")
+    assert other.status_code == 200
+    assert "No clusters match." in other.text
+    assert CARD in admin_client_collected.get("/?view=cards").text

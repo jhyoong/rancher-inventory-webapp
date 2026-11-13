@@ -1,24 +1,38 @@
 {% extends "base.html" %}
 {% from "_site_refresh.html" import site_refresh with context %}
+{% from "_cluster_list.html" import cluster_list with context %}
 {% block content %}
 <h1>Overview</h1>
 {{ site_refresh(site_names) }}
+<form method="get" action="/">
+  <input type="hidden" name="view" value="{{ view }}">
+  <label>Site <select name="site" onchange="this.form.submit()"><option value="">all sites</option>
+    {% for s in site_names %}<option {% if site == s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></label>
+  <noscript><button type="submit">Show</button></noscript>
+</form>
+{% set t = data.totals %}
 <div class="cards">
-  <div class="card"><div class="num">{{ overview.sites }}</div>Sites</div>
-  <div class="card"><div class="num">{{ overview.clusters }}</div>Clusters</div>
-  <div class="card"><div class="num">{{ overview.nodes }}</div>Nodes</div>
+  <div class="card"><div class="num">{{ t.clusters }}</div>Clusters</div>
+  <div class="card"><div class="num">{{ t.nodes }}</div>Nodes</div>
+  <div class="card"><div class="num">{{ (t.cpu_alloc_m | cores) if t.cpu_alloc_m else "not available" }}</div>vCPU allocatable</div>
+  <div class="card"><div class="num">{{ (t.mem_alloc_b | gib) if t.mem_alloc_b else "not available" }}</div>GiB memory allocatable</div>
+  <div class="card"><div class="num">{{ t.pv_count }}</div>Persistent volumes{% if t.pv_count %} ({{ t.pv_bytes | size }}){% endif %}</div>
+  <div class="card"><div class="num">{{ t.floating_ips }}</div>Floating IP needs</div>
+  <div class="card"><div class="num">{{ t.special_network_clusters }}</div>Clusters with special network config</div>
 </div>
 <p class="muted">Opt-in collectors: {{ optins | join(", ") if optins else "none active" }}</p>
-<h2>Clusters per class</h2>
-{% if classes %}
-<div class="cards">
-  {% for k in classes %}
-  <div class="card"><div class="num">{{ k.clusters }}</div><a href="/inventory?cls={{ k.class | urlencode }}">{{ k.class }}</a></div>
-  {% endfor %}
+<div class="charts">
+  <div class="chart"><canvas id="os-chart" aria-label="Nodes by OS image"></canvas></div>
+  <div class="chart"><canvas id="cpu-chart" aria-label="vCPU per cluster"></canvas></div>
+  <div class="chart"><canvas id="mem-chart" aria-label="Memory per cluster"></canvas></div>
+  <div class="chart"><canvas id="pv-chart" aria-label="Persistent volumes by storage class"></canvas></div>
+  <div class="chart"><canvas id="floating-chart" aria-label="Floating IP needs by source"></canvas></div>
 </div>
-{% else %}
-<p>No cluster has been classified yet.</p>
-{% endif %}
+<script type="application/json" id="overview-data">{{ data.charts | tojson }}</script>
+<script src="/static/chart.umd.min.js"></script>
+<script src="/static/overview.js"></script>
+<h2>Clusters</h2>
+{{ cluster_list(data.clusters, view) }}
 <h2>Failed clusters in the last run</h2>
 {% if overview.last_run %}
 <p class="muted">Run <a href="/runs/{{ overview.last_run.id }}">{{ overview.last_run.id }}</a>,

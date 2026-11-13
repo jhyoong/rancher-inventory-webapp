@@ -96,12 +96,6 @@ def test_cluster_page_profile(admin_client_collected, dev_lists):
     assert f"<td>{release}</td>" in r.text
 
 
-def test_home_class_card(admin_client_collected):
-    text = admin_client_collected.get("/").text
-    assert "Clusters per class" in text
-    assert '<div class="num">1</div><a href="/inventory?cls=stateful-helm-crd">stateful-helm-crd</a>' in text
-
-
 @pytest.fixture
 def failed_clients(collected_db, tmp_path):
     from fastapi.testclient import TestClient
