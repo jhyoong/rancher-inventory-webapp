@@ -1,0 +1,70 @@
+{% from "_class_badge.html" import state %}
+{% macro _cores(v) %}{{ "not available" if v is none else v | cores }}{% endmacro %}
+{% macro _gib(v) %}{{ "not available" if v is none else v | gib }}{% endmacro %}
+{% macro _cluster(r) %}<a href="/clusters/{{ r.site }}/{{ r.cluster_id }}">{{ r.name }}</a><br>{{ state(r, user.role == "admin") }}{% endmacro %}
+{% macro _nodes(r) %}{{ r.node_count if r.node_count is not none else "not available" }}{% endmacro %}
+{% macro _pools(r) %}{% if r.pools_status == "ok" %}<span title="{{ r.pools | join(', ') }}">{{ r.pools | length }}</span>{% elif r.pools_status == "none" %}none{% else %}not collected{% endif %}{% endmacro %}
+{% macro _cpu(r) %}{{ _cores(r.cpu_alloc_m) }} / {{ _cores(r.cpu_req_m) }} / {{ _cores(r.cpu_used_m) }}{% endmacro %}
+{% macro _mem(r) %}{{ _gib(r.mem_alloc_b) }} / {{ _gib(r.mem_req_b) }} / {{ _gib(r.mem_used_b) }}{% endmacro %}
+{% macro _pvs(r) %}{{ r.pv_count }}{% if r.pv_count %} ({{ r.pv_bytes | size }}){% endif %}{% endmacro %}
+{% macro _floating(r) %}{% set f = r.floating %}<span title="LB {{ f.lb }}, external IP {{ f.external_ip }}, ingress LB {{ f.ingress_lb }}, node external {{ f.node_external }}, control plane {{ 1 if f.control_plane else 0 }}">{{ f.total }}</span>{% endmacro %}
+{% macro _lb(r) %}{{ r.floating.implementations | join(", ") if r.floating.implementations else "none" }}{% endmacro %}
+{% macro _watch_out(r) %}{% for f in r.flags %}<span class="badge {{ 'complexity' if f in r.complexity else 'watch' }}">{{ f }}</span>{% else %}none{% endfor %}{% endmacro %}
+
+{% macro cluster_list(rows, view) %}
+<p class="view-switch">
+  <a href="{{ request.url.include_query_params(view='table') }}"{% if view == "table" %} aria-current="page"{% endif %}>Table</a> |
+  <a href="{{ request.url.include_query_params(view='cards') }}"{% if view == "cards" %} aria-current="page"{% endif %}>Cards</a>
+</p>
+{% set matched = rows and rows[0].label_hits %}
+{% if view == "cards" %}
+<div class="cluster-cards">
+  {% for r in rows %}
+  <div class="card cluster">
+    <h3>{{ _cluster(r) }}</h3>
+    <dl>
+      <dt>Site</dt><dd>{{ r.site }}</dd>
+      <dt>Kubernetes</dt><dd>{{ r.k8s_version or "not available" }}</dd>
+      <dt>Nodes</dt><dd>{{ _nodes(r) }}</dd>
+      <dt>Pools</dt><dd>{{ _pools(r) }}</dd>
+      <dt>OS</dt><dd>{{ r.os_images | join(", ") }}</dd>
+      <dt>vCPU alloc / req / used</dt><dd>{{ _cpu(r) }}</dd>
+      <dt>Memory GiB alloc / req / used</dt><dd>{{ _mem(r) }}</dd>
+      <dt>PVs</dt><dd>{{ _pvs(r) }}</dd>
+      <dt>Floating IPs</dt><dd>{{ _floating(r) }}</dd>
+      <dt>LB</dt><dd>{{ _lb(r) }}</dd>
+      <dt>Watch out</dt><dd>{{ _watch_out(r) }}</dd>
+      {% if matched %}<dt>Matched</dt><dd>{{ r.label_hits | join(", ") }}</dd>{% endif %}
+    </dl>
+  </div>
+  {% else %}
+  <p>No clusters match.</p>
+  {% endfor %}
+</div>
+{% else %}
+<table>
+  <tr><th>Site</th><th>Cluster</th><th>Kubernetes</th><th>Nodes</th><th>Pools</th><th>OS</th>
+      <th>vCPU alloc / req / used</th><th>Memory GiB alloc / req / used</th><th>PVs</th><th>Floating IPs</th>
+      <th>LB</th><th>Watch out</th>{% if matched %}<th>Matched</th>{% endif %}</tr>
+  {% for r in rows %}
+  <tr>
+    <td>{{ r.site }}</td>
+    <td>{{ _cluster(r) }}</td>
+    <td>{{ r.k8s_version or "not available" }}</td>
+    <td class="r">{{ _nodes(r) }}</td>
+    <td class="r">{{ _pools(r) }}</td>
+    <td>{{ r.os_images | join(", ") }}</td>
+    <td class="r">{{ _cpu(r) }}</td>
+    <td class="r">{{ _mem(r) }}</td>
+    <td class="r">{{ _pvs(r) }}</td>
+    <td class="r">{{ _floating(r) }}</td>
+    <td>{{ _lb(r) }}</td>
+    <td>{{ _watch_out(r) }}</td>
+    {% if matched %}<td>{{ r.label_hits | join(", ") }}</td>{% endif %}
+  </tr>
+  {% else %}
+  <tr><td colspan="12">No clusters match.</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+{% endmacro %}

@@ -3,19 +3,34 @@ import sqlite3
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from inventory.collector.rules import load_rules
-from inventory.web import queries
+from inventory.web import migration, queries
 from inventory.web.auth import User
 from inventory.web.deps import csv_download, current_user, get_settings, read_db, render, wants_csv
 
 router = APIRouter()
 
+VIEWS = ("table", "cards")
+
 
 @router.get("/clusters")
 def clusters(request: Request, conn: sqlite3.Connection = Depends(read_db), user: User = Depends(current_user)):
-    rows = queries.clusters(conn)
+    q = request.query_params
+    f = {k: q.get(k, "").strip() for k in ("site", "cls", "flag", "label")}
+    view = q.get("view") if q.get("view") in VIEWS else "table"
+    rules = load_rules(get_settings(request))
+    try:
+        rows = migration.cluster_rows(conn, rules, **{k: v or None for k, v in f.items()})
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     if wants_csv(request):
-        return csv_download(request, user, "clusters", {"clusters": rows})
-    return render(request, conn, user, "clusters.html", clusters=rows, site_names=queries.site_names(conn))
+        flat = [migration.flat_row(r) for r in rows]
+        # "inventory" is the table name of the old /inventory CSV link
+        return csv_download(request, user, "clusters", {"clusters": flat, "inventory": flat})
+    options = {**queries.inventory_filter_options(conn), "flags": list(migration.ALL_FLAGS)}
+    return render(
+        request, conn, user, "clusters.html", rows=rows, f=f, view=view, options=options,
+        site_names=queries.site_names(conn),
+    )  # fmt: skip
 
 
 @router.get("/clusters/{site}/{cluster_id}")

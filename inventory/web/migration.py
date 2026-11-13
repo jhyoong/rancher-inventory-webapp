@@ -5,7 +5,11 @@ import sqlite3
 from fnmatch import fnmatchcase
 
 from inventory.collector.annotations import matches
+from inventory.collector.classify import is_system_namespace
+from inventory.collector.rollup import COMPLEXITY_FLAGS
 from inventory.collector.rules import Rules
+from inventory.collector.units import parse_bytes
+from inventory.web.queries import FLAG_COLUMNS, inventory_rows
 
 SERVICE_SIGNALS = ("pinned-ip", "local-traffic-policy", "source-ranges", "shared-ip", "vendor-annotations")
 
@@ -196,3 +200,231 @@ def databases(
         if hits is not None and r["grp"] in group_engine:
             hits.append({"engine": group_engine[r["grp"]], "crd_group": r["grp"]})
     return result
+
+
+# ---- Watch out flags and cluster rows ----
+
+WATCH_OUT_FLAGS = (
+    "node-pinned-pv", "database", "external-ip", "nodeport", "host-network",
+    "custom-webhooks", "special-network-config", "not-collected",
+)  # fmt: skip
+
+ALL_FLAGS: tuple[str, ...] = tuple(dict.fromkeys((*FLAG_COLUMNS, *COMPLEXITY_FLAGS, *WATCH_OUT_FLAGS)))
+
+WORKLOAD_KINDS = (*DATABASE_KINDS, "replicationcontrollers")
+WEBHOOK_KINDS = ("mutatingwebhookconfigurations", "validatingwebhookconfigurations")
+FLOATING_SOURCES = ("lb", "external_ip", "ingress_lb", "node_external", "control_plane")
+
+_USER_NS = (
+    "JOIN namespace_profile n ON n.site = r.site AND n.cluster_id = r.cluster_id"
+    " AND n.namespace = r.namespace AND n.is_system = 0"
+)
+
+
+def _clusters_with(conn: sqlite3.Connection, sql: str, args: list) -> set[tuple[str, str]]:
+    return {(r[0], r[1]) for r in conn.execute(sql, args)}
+
+
+def _custom_webhook(data: dict, rules: Rules) -> bool:
+    if data.get("rancher_generated"):
+        return False
+    namespaces = data.get("service_namespaces") or []
+    return bool(data.get("url_based")) or any(ns and not is_system_namespace(ns, rules) for ns in namespaces)
+
+
+def watch_out(conn: sqlite3.Connection, rules: Rules, site: str | None = None) -> dict[tuple[str, str], list[str]]:
+    """Per cluster: WATCH_OUT_FLAGS that apply, in that order, then the stored complexity flags."""
+    return _watch_out(conn, rules, site, floating_ips(conn, rules, site), databases(conn, rules, site))
+
+
+def _watch_out(
+    conn: sqlite3.Connection, rules: Rules, site: str | None, floating: dict, dbs: dict
+) -> dict[tuple[str, str], list[str]]:
+    where, args = _scope(site, None, "c")
+    r_where, r_args = _scope(site, None, "r")
+    stored = {
+        (c["site"], c["cluster_id"]): json.loads(c["complexity_flags"] or "[]")
+        for c in conn.execute(
+            f"""SELECT c.site, c.cluster_id, p.complexity_flags FROM clusters c
+                LEFT JOIN cluster_profile p ON p.site = c.site AND p.cluster_id = c.cluster_id
+                WHERE 1=1{where} ORDER BY c.site, c.cluster_id""",
+            args,
+        )
+    }
+    base = "SELECT DISTINCT r.site, r.cluster_id FROM resources r"
+    workloads = ", ".join("?" for _ in WORKLOAD_KINDS)
+    webhooks = {
+        (r["site"], r["cluster_id"])
+        for r in conn.execute(
+            f"SELECT r.site, r.cluster_id, r.data FROM resources r WHERE r.kind IN (?, ?){r_where}",
+            [*WEBHOOK_KINDS, *r_args],
+        )
+        if _custom_webhook(json.loads(r["data"]), rules)
+    }
+    found = {
+        "node-pinned-pv": _clusters_with(
+            conn,
+            f"{base} WHERE r.kind = 'persistentvolumes'"
+            f" AND (json_extract(r.data, '$.local') = 1 OR json_extract(r.data, '$.pinned') = 1){r_where}",
+            r_args,
+        ),
+        "database": {k for k, hits in dbs.items() if hits},
+        "external-ip": {k for k, f in floating.items() if f["total"] > 0},
+        "nodeport": _clusters_with(
+            conn,
+            f"{base} {_USER_NS} WHERE r.kind = 'services'"
+            f" AND json_extract(r.data, '$.spec.type') = 'NodePort'{r_where}",
+            r_args,
+        ),
+        "host-network": _clusters_with(
+            conn,
+            f"{base} {_USER_NS} WHERE r.kind IN ({workloads})"
+            f" AND (json_extract(r.data, '$.host_network') = 1 OR json_extract(r.data, '$.host_ports') > 0){r_where}",
+            [*WORKLOAD_KINDS, *r_args],
+        ),
+        "custom-webhooks": webhooks,
+        "special-network-config": {k for k, f in floating.items() if f["special"]},
+        # only a base kind that errored in the cluster's latest run; forbidden and not_found do not count
+        "not-collected": _clusters_with(
+            conn,
+            f"""SELECT DISTINCT r.site, r.cluster_id FROM run_kinds r WHERE r.status = 'failed'
+                AND r.run_id = (SELECT max(k.run_id) FROM run_kinds k
+                                WHERE k.site = r.site AND k.cluster_id = r.cluster_id){r_where}""",
+            r_args,
+        ),
+    }  # fmt: skip
+    return {key: [f for f in WATCH_OUT_FLAGS if key in found[f]] + flags for key, flags in stored.items()}
+
+
+def label_matches(conn: sqlite3.Connection, label: str) -> dict[tuple[str, str], list[str]]:
+    """Clusters whose cluster, node or machine pool labels match `key` or `key=value`, with what matched."""
+    key, sep, value = label.partition("=")
+
+    def cond(prefix: str) -> tuple[str, list]:
+        if sep:
+            return f"{prefix}.key = ? AND {prefix}.value = ?", [key, value]
+        return f"{prefix}.key = ?", [key]
+
+    # malformed labels JSON counts as no labels
+    sources = [
+        (
+            "SELECT c.site, c.cluster_id, NULL FROM clusters c,"
+            " json_each(CASE WHEN json_valid(c.labels) THEN c.labels ELSE '{}' END) j WHERE {cond}"
+            " ORDER BY c.site, c.cluster_id",
+            "j", lambda name: "cluster",
+        ),
+        (
+            "SELECT r.site, r.cluster_id, r.name FROM resources r JOIN resource_labels l ON l.resource_id = r.id"
+            " WHERE r.kind = 'nodes' AND {cond} ORDER BY r.site, r.cluster_id, r.name",
+            "l", lambda name: f"node {name}",
+        ),
+        (
+            "SELECT p.site, p.cluster_id, p.name FROM machine_pools p,"
+            " json_each(CASE WHEN json_valid(p.labels) THEN p.labels ELSE '{}' END) j WHERE {cond}"
+            " ORDER BY p.site, p.cluster_id, p.name",
+            "j", lambda name: f"pool {name}",
+        ),
+    ]  # fmt: skip
+    out: dict[tuple[str, str], list[str]] = {}
+    for sql, prefix, what in sources:
+        where, args = cond(prefix)
+        for r in conn.execute(sql.replace("{cond}", where), args):
+            out.setdefault((r[0], r[1]), []).append(what(r[2]))
+    return out
+
+
+def cluster_rows(
+    conn: sqlite3.Connection,
+    rules: Rules,
+    site: str | None = None,
+    cls: str | None = None,
+    flag: str | None = None,
+    label: str | None = None,
+) -> list[dict]:
+    """Inventory rows plus pools, OS, usage, PVs, floating IPs, databases and Watch out flags per cluster."""
+    if flag and flag not in ALL_FLAGS:
+        raise ValueError(f"unknown flag: {flag}")
+    stored_flag = flag if flag in FLAG_COLUMNS or flag in COMPLEXITY_FLAGS else None
+    rows = inventory_rows(conn, site=site, cls=cls, flag=stored_flag)
+    floating = floating_ips(conn, rules, site)
+    dbs = databases(conn, rules, site)
+    flags = _watch_out(conn, rules, site, floating, dbs)
+    if flag and not stored_flag:
+        rows = [r for r in rows if flag in flags.get((r["site"], r["cluster_id"]), [])]
+    hits = label_matches(conn, label) if label else {}
+    if label:
+        rows = [r for r in rows if (r["site"], r["cluster_id"]) in hits]
+    if not rows:
+        return []
+
+    where, args = _scope(site, None, "c")
+    r_where, r_args = _scope(site, None, "r")
+    p_where, p_args = _scope(site, None, "p")
+    extra = {
+        (c["site"], c["cluster_id"]): dict(c)
+        for c in conn.execute(
+            f"""SELECT c.site, c.cluster_id, c.state, c.provider, c.last_error, c.pools_status,
+                       m.cpu_alloc_m, m.cpu_req_m, m.cpu_used_m, m.mem_alloc_b, m.mem_req_b, m.mem_used_b
+                FROM clusters c
+                LEFT JOIN cluster_metrics_latest m ON m.site = c.site AND m.cluster_id = c.cluster_id
+                WHERE 1=1{where}""",
+            args,
+        )
+    }
+    pools: dict[tuple[str, str], list[str]] = {}
+    for p in conn.execute(
+        f"SELECT p.site, p.cluster_id, p.name FROM machine_pools p WHERE 1=1{p_where} ORDER BY p.name", p_args
+    ):
+        pools.setdefault((p["site"], p["cluster_id"]), []).append(p["name"])
+    os_images: dict[tuple[str, str], list[str]] = {}
+    for n in conn.execute(
+        f"""SELECT DISTINCT r.site, r.cluster_id, json_extract(r.data, '$.status.nodeInfo.osImage') AS os
+            FROM resources r WHERE r.kind = 'nodes'
+            AND json_extract(r.data, '$.status.nodeInfo.osImage') IS NOT NULL{r_where} ORDER BY os""",
+        r_args,
+    ):
+        os_images.setdefault((n["site"], n["cluster_id"]), []).append(n["os"])
+    pvs: dict[tuple[str, str], list[int]] = {}
+    for v in conn.execute(
+        f"""SELECT r.site, r.cluster_id, json_extract(r.data, '$.spec.capacity.storage') AS size
+            FROM resources r WHERE r.kind = 'persistentvolumes'{r_where}""",
+        r_args,
+    ):
+        count_bytes = pvs.setdefault((v["site"], v["cluster_id"]), [0, 0])
+        count_bytes[0] += 1
+        count_bytes[1] += parse_bytes(v["size"]) if v["size"] else 0
+
+    for row in rows:
+        key = (row["site"], row["cluster_id"])
+        e = extra[key]
+        pv_count, pv_bytes = pvs.get(key, [0, 0])
+        row.update(
+            state=e["state"], provider=e["provider"], last_error=e["last_error"],
+            pools_status=e["pools_status"],
+            pools=pools.get(key, []),
+            os_images=os_images.get(key) or ["not collected"],
+            cpu_alloc_m=e["cpu_alloc_m"], cpu_req_m=e["cpu_req_m"], cpu_used_m=e["cpu_used_m"],
+            mem_alloc_b=e["mem_alloc_b"], mem_req_b=e["mem_req_b"], mem_used_b=e["mem_used_b"],
+            pv_count=pv_count, pv_bytes=pv_bytes,
+            floating=floating[key],
+            databases=sorted({h["engine"] for h in dbs.get(key, [])}),
+            flags=flags.get(key, []),
+            label_hits=hits.get(key, []),
+        )  # fmt: skip
+    return rows
+
+
+def flat_row(row: dict) -> dict:
+    """One CSV row: lists joined with "; ", floating IPs as a total plus one column per source."""
+    out = {}
+    for k, v in row.items():
+        if k == "floating":
+            out["floating_total"] = v["total"]
+            for s in FLOATING_SOURCES:
+                out[f"floating_{s}"] = (1 if v[s] else 0) if s == "control_plane" else v[s]
+            out["lb_implementations"] = "; ".join(v["implementations"])
+        elif isinstance(v, list):
+            out[k] = "; ".join(str(x) for x in v)
+        else:
+            out[k] = v
+    return out
