@@ -2,11 +2,14 @@
 
 import json
 import sqlite3
+from fnmatch import fnmatchcase
 
 from inventory.collector.annotations import matches
 from inventory.collector.rules import Rules
 
 SERVICE_SIGNALS = ("pinned-ip", "local-traffic-policy", "source-ranges", "shared-ip", "vendor-annotations")
+
+DATABASE_KINDS = ("deployments", "statefulsets", "daemonsets", "cronjobs", "jobs")
 
 UNIDENTIFIED = "unidentified"
 SEVERAL_LB = "several-lb-implementations"
@@ -130,4 +133,66 @@ def floating_ips(
             implementations=implementations,
             special=sorted(special),
         )  # fmt: skip
+    return result
+
+
+def image_repo_name(image: str) -> str:
+    """Last path segment of the repository, without tag or digest."""
+    repo = image.split("@", 1)[0]
+    last = repo.rsplit("/", 1)[-1]
+    return last.split(":", 1)[0]
+
+
+def image_engine(image: str, rules: Rules) -> str | None:
+    name = image_repo_name(image)
+    db = rules.databases
+    if any(fnmatchcase(name, p) for p in db["exclude"]):
+        return None
+    for engine, patterns in db["images"].items():
+        if any(fnmatchcase(name, p) for p in patterns):
+            return engine
+    return None
+
+
+def databases(
+    conn: sqlite3.Connection, rules: Rules, site: str | None = None, cluster_id: str | None = None
+) -> dict[tuple[str, str], list[dict]]:
+    """Per cluster: databases found in user-namespace workload images and operator CRD groups."""
+    where, args = _scope(site, cluster_id, "c")
+    r_where, r_args = _scope(site, cluster_id, "r")
+    result = {
+        (c["site"], c["cluster_id"]): []
+        for c in conn.execute(f"SELECT site, cluster_id FROM clusters c WHERE 1=1{where} ORDER BY site, cluster_id", args)
+    }
+    kinds = ", ".join("?" for _ in DATABASE_KINDS)
+    seen = set()
+    for r in conn.execute(
+        f"""SELECT r.site, r.cluster_id, r.namespace, r.kind, r.name, i.image
+            FROM resources r
+            JOIN resource_images i ON i.resource_id = r.id
+            JOIN namespace_profile n ON n.site = r.site AND n.cluster_id = r.cluster_id AND n.namespace = r.namespace
+            WHERE r.kind IN ({kinds}) AND n.is_system = 0{r_where}
+            ORDER BY r.site, r.cluster_id, r.namespace, r.kind, r.name, i.image""",
+        [*DATABASE_KINDS, *r_args],
+    ):
+        hits = result.get((r["site"], r["cluster_id"]))
+        engine = image_engine(r["image"], rules)
+        key = (r["site"], r["cluster_id"], engine, r["namespace"], r["kind"], r["name"])
+        if hits is None or engine is None or key in seen:
+            continue
+        seen.add(key)
+        hits.append(
+            {"engine": engine, "namespace": r["namespace"], "kind": r["kind"], "name": r["name"], "image": r["image"]}
+        )
+
+    group_engine = {g: e for e, groups in rules.databases["operator_crd_groups"].items() for g in groups}
+    for r in conn.execute(
+        f"""SELECT DISTINCT r.site, r.cluster_id, json_extract(r.data, '$.spec.group') AS grp
+            FROM resources r WHERE r.kind = 'customresourcedefinitions'{r_where}
+            ORDER BY r.site, r.cluster_id, grp""",
+        r_args,
+    ):
+        hits = result.get((r["site"], r["cluster_id"]))
+        if hits is not None and r["grp"] in group_engine:
+            hits.append({"engine": group_engine[r["grp"]], "crd_group": r["grp"]})
     return result

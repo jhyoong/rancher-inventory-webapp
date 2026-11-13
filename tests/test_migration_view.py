@@ -6,7 +6,14 @@ import pytest
 from inventory.collector.netpolicy import derive_service
 from inventory.collector.rules import load_rules
 from inventory.collector.transform import trim
-from inventory.web.migration import floating_ips, lb_implementation, service_signals
+from inventory.web.migration import (
+    databases,
+    floating_ips,
+    image_engine,
+    image_repo_name,
+    lb_implementation,
+    service_signals,
+)
 
 ADDRESS_ROLES = ("lb", "ingress-lb", "external-ip", "node-external")
 
@@ -121,3 +128,50 @@ def test_pinned_load_balancer_ip_counted(collected_db, tmp_path, open_db, settin
         " WHERE r.cluster_id='local' AND a.role='ingress-lb'"
     ).fetchone()[0]
     assert pin(existing)["total"] == before["total"]
+
+
+@pytest.mark.parametrize(
+    "image, expected",
+    [
+        ("docker.io/library/postgres:18", "postgres"),
+        ("registry:5000/team/redis@sha256:ab", "redis"),
+        ("postgres", "postgres"),
+        ("quay.io/prometheuscommunity/postgres-exporter:v0.15", "postgres-exporter"),
+    ],
+)
+def test_image_repo_name(image, expected):
+    assert image_repo_name(image) == expected
+
+
+@pytest.mark.parametrize(
+    "image, expected",
+    [
+        ("postgres:18", "postgresql"),
+        ("quay.io/prometheuscommunity/postgres-exporter:v0.15", None),
+        ("rancher/local-path-provisioner:v0.0.31", None),
+    ],
+)
+def test_image_engine(settings, image, expected):
+    assert image_engine(image, load_rules(settings)) == expected
+
+
+@pytest.mark.live
+def test_databases_dev(collected_db, open_db, settings):
+    conn = open_db(collected_db.db_path)
+    hits = databases(conn, load_rules(settings))[("dev", "local")]
+    image = conn.execute(
+        "SELECT i.image FROM resource_images i JOIN resources r ON r.id = i.resource_id"
+        " WHERE r.site='dev' AND r.cluster_id='local' AND r.kind='deployments'"
+        " AND r.namespace='kagent' AND r.name='kagent-postgresql'"
+    ).fetchone()[0]
+    assert {
+        "engine": "postgresql", "namespace": "kagent", "kind": "deployments",
+        "name": "kagent-postgresql", "image": image,
+    } in hits  # fmt: skip
+    system = {
+        r[0]
+        for r in conn.execute(
+            "SELECT namespace FROM namespace_profile WHERE site='dev' AND cluster_id='local' AND is_system=1"
+        )
+    }
+    assert not [h for h in hits if h.get("namespace") in system]
