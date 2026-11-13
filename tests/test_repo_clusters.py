@@ -2,6 +2,7 @@ import pytest
 
 from inventory.collector.units import metrics_from_cluster, parse_cpu
 from inventory.db.repo import (
+    cluster_api_endpoint,
     mark_cluster_failed,
     mark_cluster_ok,
     upsert_cluster,
@@ -41,3 +42,10 @@ def test_retention_and_marks(db, local_cluster, dev_node_usage):
     row = db.execute("SELECT * FROM clusters").fetchone()
     assert row["last_error"] is None and row["last_ok_run"] == 2
     assert row["last_ok_at"] == "2026-11-12T02:00:00Z"
+
+
+@pytest.mark.live
+def test_api_endpoint_from_v3(local_cluster):
+    assert cluster_api_endpoint(local_cluster) is None
+    with_fqdn = {**local_cluster, "localClusterAuthEndpoint": {"enabled": True, "fqdn": "api.dev.example"}}
+    assert cluster_api_endpoint(with_fqdn) == "api.dev.example"

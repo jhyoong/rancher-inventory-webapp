@@ -26,16 +26,25 @@ def transaction(conn: sqlite3.Connection):
         raise
 
 
+def cluster_api_endpoint(cluster: dict) -> str | None:
+    """The address clients use: the auth endpoint FQDN when enabled, else the API endpoint."""
+    auth = cluster.get("localClusterAuthEndpoint") or {}
+    if auth.get("enabled") and auth.get("fqdn"):
+        return auth["fqdn"]
+    return cluster.get("apiEndpoint") or None
+
+
 def upsert_cluster(conn: sqlite3.Connection, site: str, cluster: dict, run_id: int) -> None:
     with transaction(conn):
         conn.execute(
             """INSERT INTO clusters (site, cluster_id, name, state, provider, k8s_version,
-                                     labels, node_count, last_seen_run)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                     labels, node_count, api_endpoint, last_seen_run)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT (site, cluster_id) DO UPDATE SET
                  name=excluded.name, state=excluded.state, provider=excluded.provider,
                  k8s_version=excluded.k8s_version, labels=excluded.labels,
-                 node_count=excluded.node_count, last_seen_run=excluded.last_seen_run""",
+                 node_count=excluded.node_count, api_endpoint=excluded.api_endpoint,
+                 last_seen_run=excluded.last_seen_run""",
             (
                 site,
                 cluster["id"],
@@ -45,8 +54,44 @@ def upsert_cluster(conn: sqlite3.Connection, site: str, cluster: dict, run_id: i
                 (cluster.get("version") or {}).get("gitVersion"),
                 json.dumps(cluster.get("labels") or {}, sort_keys=True),
                 cluster.get("nodeCount"),
+                cluster_api_endpoint(cluster),
                 run_id,
             ),
+        )
+
+
+def write_pools(
+    conn: sqlite3.Connection,
+    site: str,
+    cluster_id: str,
+    status: str,
+    prov_name: str | None,
+    pools: list,
+) -> None:
+    """Record the pools status and replace the cluster's machine pools."""
+    with transaction(conn):
+        conn.execute(
+            "UPDATE clusters SET pools_status = ?, prov_name = ? WHERE site = ? AND cluster_id = ?",
+            (status, prov_name, site, cluster_id),
+        )
+        conn.execute("DELETE FROM machine_pools WHERE site = ? AND cluster_id = ?", (site, cluster_id))
+        conn.executemany(
+            """INSERT INTO machine_pools (site, cluster_id, name, quantity, roles, labels, taints,
+                                          machine_config_kind)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            [
+                (
+                    site,
+                    cluster_id,
+                    p.name,
+                    p.quantity,
+                    json.dumps(p.roles),
+                    json.dumps(p.labels, sort_keys=True),
+                    json.dumps(p.taints),
+                    p.machine_config_kind,
+                )
+                for p in pools
+            ],
         )
 
 
