@@ -224,3 +224,6 @@ dev/data/
 
 # Superpowers brainstorm server state
 .superpowers/
+
+# Real objects supplied by the user for parser tests
+tests/fixtures/real/

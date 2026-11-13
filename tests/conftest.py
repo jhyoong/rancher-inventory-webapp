@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -107,6 +108,19 @@ def live_client(live_loop):
     client = RancherClient(site, site_token(site), settings.request_timeout_s)
     yield client
     live_loop.run_until_complete(client.aclose())
+
+
+@pytest.fixture
+def real_fixture():
+    """Load tests/fixtures/real/<name> as JSON, or skip when the user has not supplied it."""
+
+    def _load(name: str):
+        path = ROOT / "tests/fixtures/real" / name
+        if not path.exists():
+            pytest.skip(f"P2 fixtures missing: {name}")
+        return json.loads(path.read_text())
+
+    return _load
 
 
 @pytest.fixture

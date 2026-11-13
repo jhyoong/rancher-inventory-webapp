@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import date
 
 from inventory.collector.kinds import load_kinds
+from inventory.collector.provisioning import PROVISIONING_PATH
 from inventory.rancher.client import RancherClient, RancherError
 from inventory.settings import ConfigError, Settings, Site, load_sites, mask_token, site_token
 
@@ -18,6 +19,7 @@ class SiteCheck:
     clusters: int | None = None
     sample_cluster: str | None = None
     kinds: dict[str, int] = field(default_factory=dict)
+    provisioning: int | None = None
     errors: list[str] = field(default_factory=list)
     token_masked: str = ""
 
@@ -88,17 +90,24 @@ async def _run_checks(check: SiteCheck, site: Site, settings: Settings, kinds) -
         cid = sample["id"]
         check.sample_cluster = cid
 
-        async def probe(name: str, path: str) -> None:
+        async def probe(name: str, path: str, cid: str = cid) -> None:
             try:
                 await client.list_kind(cid, path, page_size=1)
-                check.kinds[name] = 200
+                status = 200
             except RancherError as e:
                 if e.status is None:
                     check.errors.append(f"{name}: {e}")
-                else:
-                    check.kinds[name] = e.status
+                    return
+                status = e.status
+            if name == "provisioning":
+                check.provisioning = status
+            else:
+                check.kinds[name] = status
 
-        await asyncio.gather(*(probe(k.name, k.path) for k in kinds.values()))
+        await asyncio.gather(
+            probe("provisioning", PROVISIONING_PATH, cid="local"),
+            *(probe(k.name, k.path) for k in kinds.values()),
+        )
 
 
 async def check_config(settings: Settings) -> list[SiteCheck]:
@@ -130,6 +139,13 @@ def format_report(checks: list[SiteCheck]) -> str:
             for status in sorted({s for s in c.kinds.values() if s != 200}):
                 names = sorted(k for k, s in c.kinds.items() if s == status)
                 lines.append(f"  kinds {status} ({len(names)}): {', '.join(names)}")
+        if c.provisioning == 200:
+            lines.append("  provisioning clusters (optional): readable")
+        elif c.provisioning is not None:
+            lines.append(
+                f"  provisioning clusters (optional): HTTP {c.provisioning}, "
+                "machine pools and CNI from Rancher not available"
+            )
         for err in c.errors:
             lines.append(f"  ERROR: {err}")
         lines.append("")

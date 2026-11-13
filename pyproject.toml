@@ -35,6 +35,7 @@ include = [
 markers = [
     "live: needs the dev Rancher",
     "slow: takes minutes; skipped unless -m slow is given",
+    "real_fixtures: needs the user's real objects in tests/fixtures/real",
 ]
 addopts = "-m 'not slow'"
 filterwarnings = [
