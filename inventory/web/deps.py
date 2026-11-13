@@ -91,6 +91,14 @@ def csv_download(request: Request, user: User, page: str, tables: dict[str, list
     return csv_response(tables[name] or [], f"{page}-{name}.csv", (columns or {}).get(name))
 
 
+def cap_rows(tables: dict[str, list | None], limit: int) -> set[str]:
+    """Cut each list fetched with limit + 1 rows back to limit; return the names that had more."""
+    capped = {name for name, rows in tables.items() if rows is not None and len(rows) > limit}
+    for name in capped:
+        del tables[name][limit:]
+    return capped
+
+
 def get_settings(request: Request) -> Settings:
     return request.app.state.settings
 

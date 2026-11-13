@@ -1,0 +1,79 @@
+<h2>Overview page: which layout fits how you plan a migration?</h2>
+<p class="subtitle">Numbers are from your dev database (one cluster: dev / local). Grey boxes are chart areas; with more clusters they fill out. OS shows "not stored" because the dev data has no osImage on nodes, which I'll come back to.</p>
+
+<style>
+  .w { font-family: system-ui, sans-serif; font-size: 13px; color: #222; }
+  .tiles { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; margin-bottom: 8px; }
+  .tile { background: #fff; border: 1px solid #ccc; padding: 6px; }
+  .tile b { display: block; font-size: 18px; }
+  .tile span { color: #666; font-size: 11px; }
+  .row3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 8px; }
+  .chartbox { background: #eee; border: 1px dashed #999; height: 90px; padding: 6px; color: #555; font-size: 11px; }
+  .bar { height: 12px; background: #4a6fa5; margin-top: 6px; }
+  .toggle { display: inline-flex; border: 1px solid #999; margin-bottom: 6px; }
+  .toggle span { padding: 2px 8px; font-size: 11px; }
+  .toggle .on { background: #333; color: #fff; }
+  table.t { border-collapse: collapse; width: 100%; background: #fff; font-size: 11px; }
+  table.t th, table.t td { border: 1px solid #ccc; padding: 3px 5px; text-align: left; }
+  table.t th { background: #f0f0f0; }
+  .flag { display: inline-block; background: #fff4d6; color: #8a5a00; padding: 0 4px; margin: 1px; font-size: 10px; }
+  .ccard { background: #fff; border: 1px solid #ccc; padding: 8px; margin-bottom: 6px; }
+  .ccard h4 { margin: 0 0 4px 0; }
+  .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; font-size: 11px; }
+  .grid4 div b { display: block; font-size: 14px; }
+  .ghost { opacity: 0.35; }
+</style>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Site totals first, then the cluster list</h3>
+      <p>Answers "how much hardware does this site need in total" at a glance, then lets you drill into clusters.</p>
+      <div class="mockup"><div class="mockup-header">/ (Overview) - site: dev</div><div class="mockup-body w">
+        <div class="tiles">
+          <div class="tile"><b>1</b><span>Clusters</span></div>
+          <div class="tile"><b>3</b><span>Nodes</span></div>
+          <div class="tile"><b>12</b><span>vCPU allocatable</span></div>
+          <div class="tile"><b>30.9 GiB</b><span>Memory allocatable</span></div>
+          <div class="tile"><b>500 Mi</b><span>PV storage (1 PV)</span></div>
+          <div class="tile"><b>1</b><span>External IPs / LBs</span></div>
+        </div>
+        <div class="row3">
+          <div class="chartbox">Nodes by OS image (donut)<br><br>not stored</div>
+          <div class="chartbox">vCPU and memory per cluster: allocatable vs requested vs used (bars)
+            <div class="bar" style="width:100%"></div><div class="bar" style="width:29%;background:#c97b2a"></div><div class="bar" style="width:8%;background:#3d8b5a"></div></div>
+          <div class="chartbox">PV storage by storage class (bars)<br><br>local-path: 500 Mi</div>
+        </div>
+        <div class="toggle"><span class="on">Table</span><span>Cards</span></div>
+        <table class="t">
+          <tr><th>Cluster</th><th>Nodes</th><th>OS</th><th>vCPU</th><th>Mem GiB</th><th>PVs</th><th>External IPs</th><th>Watch out</th></tr>
+          <tr><td>local</td><td>3</td><td>not stored</td><td>12</td><td>30.9</td><td>1 (500 Mi)</td><td>192.168.50.210 (ingress)</td><td><span class="flag">local-path PV</span><span class="flag">database: postgresql</span></td></tr>
+        </table>
+      </div></div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>One migration sheet per cluster</h3>
+      <p>Each cluster is a block with everything needed to move it. Site totals are a single line on top. Toggle to a flat table.</p>
+      <div class="mockup"><div class="mockup-header">/ (Overview) - site: dev</div><div class="mockup-body w">
+        <p style="font-size:11px;color:#555;margin:0 0 6px 0">Site dev: 1 cluster, 3 nodes, 12 vCPU, 30.9 GiB memory, 500 Mi PV storage, 1 external IP</p>
+        <div class="toggle"><span>Table</span><span class="on">Cards</span></div>
+        <div class="ccard">
+          <h4>local <span style="color:#666;font-weight:normal">rke2 v1.34.3</span></h4>
+          <div class="grid4">
+            <div><b>3 nodes</b>1 control-plane/etcd, 2 workers</div>
+            <div><b>12 vCPU / 30.9 GiB</b>used: 1 vCPU / 11.5 GiB</div>
+            <div><b>1 PV, 500 Mi</b>local-path, pinned to a node</div>
+            <div><b>1 external IP</b>192.168.50.210 (ingress rancher.local)</div>
+          </div>
+          <p style="margin:6px 0 0 0"><span class="flag">local-path PV</span><span class="flag">database: postgresql (kagent)</span><span class="flag">OS: not stored</span></p>
+        </div>
+        <div class="ccard ghost"><h4>next cluster ...</h4></div>
+      </div></div>
+    </div>
+  </div>
+</div>

@@ -6,6 +6,9 @@ The full design is in [Rancher Inventory Tool Implementation Plan (single image,
 
 Status: plans 1 and 2 are built and tested on the dev Mac against the dev Rancher, in Docker, including a restore and an upgrade drill. The `linux/amd64` image is built for the airgap; the install on the airgap host itself is not done yet (see [Airgap install](#airgap-install)).
 
+docker push jhyoong/rancher-inventory:1.0.0-dev
+http://localhost:55465/?key=c5dceb575916ad55ab647f148684e4aee99539fb234734d0257934efeddb3276 
+
 ## Contents
 
 1. [What you need](#what-you-need)

@@ -286,6 +286,7 @@ def check_preset(conn: sqlite3.Connection, preset_id: int) -> list[dict]:
     if preset is None:
         raise ValueError("preset not found")
     filters = json.loads(preset["filters"])
+    validate_filters(filters)
     where, params = _where(filters)
     found = {
         (r[0], r[1])

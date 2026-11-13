@@ -9,7 +9,7 @@
   <label>Name <input name="name" value="{{ name_filter }}"></label>
   <button type="submit">Filter</button>
 </form>
-{% if rows | length >= max_rows %}<p class="warn">Showing the first {{ max_rows }} rows. Add filters to narrow the result.</p>{% endif %}
+{% if 'workloads' in capped %}<p class="warn">Showing the first {{ max_rows }} rows. Add filters to narrow the result.</p>{% endif %}
 <table>
   <tr><th>Site</th><th>Cluster</th><th>Kind</th><th>Namespace</th><th>Name</th><th>Ready</th><th>Containers</th>
       <th>CPU req / lim (cores)</th><th>Memory req / lim (GiB)</th><th>GPU</th><th>Owner</th><th>Warnings</th></tr>

@@ -92,6 +92,17 @@ def test_cap_note_only_when_more_rows(admin_client_collected, monkeypatch):
     assert "Showing the first" in admin_client_collected.get("/query?kind=namespaces").text
 
 
+@pytest.mark.parametrize("path", ["/workloads", "/namespaces"])
+def test_page_cap_note_only_when_more_rows(admin_client_collected, monkeypatch, path):
+    total = len(admin_client_collected.get(f"{path}?format=csv").text.strip().splitlines()) - 1
+    monkeypatch.setattr(queries, "PAGE_LIMIT", total)
+    assert "Showing the first" not in admin_client_collected.get(path).text
+    monkeypatch.setattr(queries, "PAGE_LIMIT", total - 1)
+    assert "Showing the first" in admin_client_collected.get(path).text
+    rows = admin_client_collected.get(f"{path}?format=csv").text.strip().splitlines()
+    assert len(rows) - 1 == total - 1
+
+
 CSV_PAGES = [
     "/clusters", "/inventory", "/network", "/network?table=duplicates", "/helm", "/crds", "/annotations",
     "/workloads", "/storage", "/storage?table=pvs", "/storage?table=snapshots", "/namespaces",
@@ -156,7 +167,8 @@ def test_invalid_stored_preset(admin_client_collected, collected_db, tmp_path, o
     conn = open_db(s.db_path)
     conn.execute("INSERT INTO presets (name, filters, created_at) VALUES ('bad-key', ?, 'x')", (json.dumps({"data": "1"}),))
     conn.execute("INSERT INTO presets (name, filters, created_at) VALUES ('bad-json', '{not json', 'x')")
-    ids = [r[0] for r in conn.execute("SELECT id FROM presets WHERE name IN ('bad-key', 'bad-json')")]
+    conn.execute("INSERT INTO presets (name, filters, created_at) VALUES ('bad-shape', '[{}]', 'x')")
+    ids = [r[0] for r in conn.execute("SELECT id FROM presets WHERE name IN ('bad-key', 'bad-json', 'bad-shape')")]
     with TestClient(create_app(s, None)) as c:
         c = _login(c, s, "admin", TEST_PASSWORD)
         assert c.get("/presets").status_code == 200
