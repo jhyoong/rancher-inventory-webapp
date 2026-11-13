@@ -1,4 +1,5 @@
 import json
+import re
 
 import pytest
 
@@ -66,7 +67,9 @@ def test_inventory_flag_badges_and_filter(admin_client_collected, collected_db, 
     flags = json.loads(conn.execute("SELECT complexity_flags FROM cluster_profile WHERE cluster_id='local'").fetchone()[0])
     text = admin_client_collected.get("/inventory").text
     for f in flags:
-        assert f'<span class="badge complexity">{f}</span>' in text.replace("&lt;", "<"), f
+        # each badge links to the cluster page section behind the flag
+        assert re.search(rf'<a class="badge complexity" href="/clusters/dev/local#[a-z-]+">{re.escape(f)}</a>',
+                         text.replace("&lt;", "<")), f  # fmt: skip
     assert "local" in admin_client_collected.get("/inventory?flag=" + flags[0]).text
     absent = next(f for f in COMPLEXITY_FLAGS if f not in flags)
     assert "No clusters match." in admin_client_collected.get("/inventory", params={"flag": absent}).text
