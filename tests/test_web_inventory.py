@@ -93,7 +93,8 @@ def test_annotations_page(collected_db, admin_client_collected, open_db):
 
 def test_cluster_page_profile(admin_client_collected, dev_lists):
     r = admin_client_collected.get("/clusters/dev/local")
-    assert "Namespaces" in r.text and "Helm releases" in r.text and "stateful-helm-crd" in r.text
+    assert "Namespaces" in r.text and "Helm releases" in r.text
+    assert 'class="badge class"' not in r.text  # the class badge is no longer shown; Watch out carries the flags
     assert "<td>kagent</td>" in r.text  # a real user namespace
     release = dev_lists["helmreleases"][0]["metadata"]["name"]
     assert f"<td>{release}</td>" in r.text

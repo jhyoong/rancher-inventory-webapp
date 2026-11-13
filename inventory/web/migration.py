@@ -17,6 +17,7 @@ SERVICE_SIGNALS = ("pinned-ip", "local-traffic-policy", "source-ranges", "shared
 DATABASE_KINDS = ("deployments", "statefulsets", "daemonsets", "cronjobs", "jobs")
 
 UNIDENTIFIED = "unidentified"
+NOT_COLLECTED = "not collected"
 SEVERAL_LB = "several-lb-implementations"
 
 
@@ -122,9 +123,10 @@ def floating_ips(
         src = entry.pop("_sources")
         # status.loadBalancer.ingress (stored as lb addresses) plus pinned spec.loadBalancerIP
         lb = src.get("lb", set()) | {a for s in services.get(key, []) for a in s["addresses"]}
+        # each source excludes addresses already counted, so the sources add up to the address count
         ingress = src.get("ingress-lb", set()) - lb
-        external = src.get("external-ip", set())
-        node = src.get("node-external", set())
+        external = src.get("external-ip", set()) - lb - ingress
+        node = src.get("node-external", set()) - lb - ingress - external
         addresses = sorted(lb | ingress | external | node)
         svcs = services.get(key, [])
         implementations = sorted({s["implementation"] for s in svcs})
@@ -212,6 +214,16 @@ WATCH_OUT_FLAGS = (
 
 ALL_FLAGS: tuple[str, ...] = tuple(dict.fromkeys((*FLAG_COLUMNS, *COMPLEXITY_FLAGS, *WATCH_OUT_FLAGS)))
 
+# Watch out flag -> id of the cluster page section with the rows behind it
+FLAG_ANCHORS = {
+    "node-pinned-pv": "pvs", "database": "databases", "external-ip": "external-networking",
+    "nodeport": "nodeport-services", "host-network": "namespaces", "custom-webhooks": "webhooks",
+    "special-network-config": "lb-services", "not-collected": "summary",
+    "k8s<1.32": "summary", "stateful": "databases", "rwx": "pvcs", "nginx-snippets": "ingresses",
+    "many-crds": "crd-groups", "deprecated-apis": "summary", "privileged/hostpath": "namespaces",
+    "gpu": "nodes", "operators": "crd-groups", "intercept-all-webhooks": "webhooks",
+}  # fmt: skip
+
 WORKLOAD_KINDS = (*DATABASE_KINDS, "replicationcontrollers")
 WEBHOOK_KINDS = ("mutatingwebhookconfigurations", "validatingwebhookconfigurations")
 FLOATING_SOURCES = ("lb", "external_ip", "ingress_lb", "node_external", "control_plane")
@@ -233,16 +245,19 @@ def _custom_webhook(data: dict, rules: Rules) -> bool:
     return bool(data.get("url_based")) or any(ns and not is_system_namespace(ns, rules) for ns in namespaces)
 
 
-def watch_out(conn: sqlite3.Connection, rules: Rules, site: str | None = None) -> dict[tuple[str, str], list[str]]:
+def watch_out(
+    conn: sqlite3.Connection, rules: Rules, site: str | None = None, cluster_id: str | None = None
+) -> dict[tuple[str, str], list[str]]:
     """Per cluster: WATCH_OUT_FLAGS that apply, in that order, then the stored complexity flags."""
-    return _watch_out(conn, rules, site, floating_ips(conn, rules, site), databases(conn, rules, site))
+    floating = floating_ips(conn, rules, site, cluster_id)
+    return _watch_out(conn, rules, site, floating, databases(conn, rules, site, cluster_id), cluster_id)
 
 
 def _watch_out(
-    conn: sqlite3.Connection, rules: Rules, site: str | None, floating: dict, dbs: dict
+    conn: sqlite3.Connection, rules: Rules, site: str | None, floating: dict, dbs: dict, cluster_id: str | None = None
 ) -> dict[tuple[str, str], list[str]]:
-    where, args = _scope(site, None, "c")
-    r_where, r_args = _scope(site, None, "r")
+    where, args = _scope(site, cluster_id, "c")
+    r_where, r_args = _scope(site, cluster_id, "r")
     stored = {
         (c["site"], c["cluster_id"]): json.loads(c["complexity_flags"] or "[]")
         for c in conn.execute(
@@ -270,8 +285,9 @@ def _watch_out(
             r_args,
         ),
         "database": {k for k, hits in dbs.items() if hits},
-        # LB, externalIPs, ingress LB and node external addresses; the control plane endpoint does not count
-        "external-ip": {k for k, f in floating.items() if f["addresses"]},
+        # LB (with pinned loadBalancerIP), Service externalIPs and ingress LB addresses; node ExternalIP
+        # addresses and the control plane endpoint count as floating IPs but do not set the flag
+        "external-ip": {k for k, f in floating.items() if f["lb"] or f["external_ip"] or f["ingress_lb"]},
         "nodeport": _clusters_with(
             conn,
             f"{base} {_USER_NS} WHERE r.kind = 'services'"
@@ -394,7 +410,7 @@ def cluster_rows(
     ):
         count_bytes = pvs.setdefault((v["site"], v["cluster_id"]), [0, 0])
         count_bytes[0] += 1
-        count_bytes[1] += parse_bytes(v["size"]) if v["size"] else 0
+        count_bytes[1] += _quantity(parse_bytes, v["size"]) or 0  # an unparsable size counts as unknown
 
     for row in rows:
         key = (row["site"], row["cluster_id"])
@@ -412,6 +428,8 @@ def cluster_rows(
             databases=sorted({h["engine"] for h in dbs.get(key, [])}),
             flags=flags.get(key, []),
             label_hits=hits.get(key, []),
+            # no cluster_profile row: the cluster never had a successful collection
+            collected=row["class"] is not None,
         )  # fmt: skip
     return rows
 
@@ -438,7 +456,7 @@ def site_overview(conn: sqlite3.Connection, rules: Rules, site: str | None = Non
     ):
         c = pv_by_class.setdefault(v["storage_class"], {"storage_class": v["storage_class"], "pv_count": 0, "bytes": 0})
         c["pv_count"] += 1
-        c["bytes"] += parse_bytes(v["size"]) if v["size"] else 0
+        c["bytes"] += _quantity(parse_bytes, v["size"]) or 0  # an unparsable size counts as unknown
     sources = ("lb", "external_ip", "ingress_lb", "node_external")
     return {
         "totals": {
@@ -470,7 +488,10 @@ def site_overview(conn: sqlite3.Connection, rules: Rules, site: str | None = Non
 
 
 def flat_row(row: dict) -> dict:
-    """One CSV row: lists joined with "; ", floating IPs as a total plus one column per source."""
+    """One CSV row: lists joined with "; ", floating IPs as a total plus one column per source.
+
+    A cluster without a successful collection gets "not collected" for PVs, floating IPs, LB and flags.
+    """
     out = {}
     for k, v in row.items():
         if k == "floating":
@@ -482,6 +503,10 @@ def flat_row(row: dict) -> dict:
             out[k] = "; ".join(str(x) for x in v)
         else:
             out[k] = v
+    if not row.get("collected", True):
+        for k in out:
+            if k in ("pv_count", "pv_bytes", "lb_implementations", "flags") or k.startswith("floating_"):
+                out[k] = NOT_COLLECTED
     return out
 
 
@@ -586,7 +611,7 @@ def cluster_sheet(conn: sqlite3.Connection, rules: Rules, site: str, cluster_id:
     key = (site, cluster_id)
     floating = floating_ips(conn, rules, site, cluster_id)
     dbs = databases(conn, rules, site, cluster_id)
-    flags = _watch_out(conn, rules, site, floating, dbs).get(key, [])
+    flags = _watch_out(conn, rules, site, floating, dbs, cluster_id).get(key, [])
     nodes = node_groups(conn, site, cluster_id)
     pvs = queries.pvs(conn, site=site, cluster_id=cluster_id)
     for pv in pvs:

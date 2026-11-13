@@ -1,8 +1,11 @@
 """Machine pools, CNI and CIDRs from provisioning.cattle.io clusters, read through the `local` cluster."""
 
+import logging
 from dataclasses import dataclass, field
 
 from inventory.rancher.client import RancherClient, RancherError
+
+log = logging.getLogger(__name__)
 
 PROVISIONING_PATH = "/apis/provisioning.cattle.io/v1/clusters"
 
@@ -73,7 +76,13 @@ async def read_provisioning(client: RancherClient) -> ProvisioningResult:
         return ProvisioningResult("forbidden" if e.status in (401, 403) else "failed", {}, str(e))
     clusters = {}
     for item in items:
-        parsed = parse_provisioning(item)
+        # one malformed item is skipped and logged; it does not fail the run
+        try:
+            parsed = parse_provisioning(item)
+        except (AttributeError, TypeError, ValueError) as e:
+            name = ((item.get("metadata") or {}).get("name") if isinstance(item, dict) else None) or "unknown"
+            log.warning("skipped malformed provisioning cluster %s: %r", name, e)
+            continue
         if parsed:
             clusters[parsed[0]] = parsed[1]
     return ProvisioningResult("ok", clusters)

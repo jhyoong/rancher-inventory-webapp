@@ -23,9 +23,12 @@ def clusters(request: Request, conn: sqlite3.Connection = Depends(read_db), user
     except ValueError as e:
         raise HTTPException(400, str(e))
     if wants_csv(request):
-        flat = [migration.flat_row(r) for r in rows]
-        # "inventory" is the table name of the old /inventory CSV link
-        return csv_download(request, user, "clusters", {"clusters": flat, "inventory": flat})
+        keep = {(r["site"], r["cluster_id"]) for r in rows}
+        # "inventory" is the table of the old /inventory CSV link: its columns and encoding, for the filtered clusters
+        old = [r for r in queries.inventory_rows(conn, site=f["site"] or None) if (r["site"], r["cluster_id"]) in keep]
+        return csv_download(
+            request, user, "clusters", {"clusters": [migration.flat_row(r) for r in rows], "inventory": old}
+        )
     options = {**queries.inventory_filter_options(conn), "flags": list(migration.ALL_FLAGS)}
     return render(
         request, conn, user, "clusters.html", rows=rows, f=f, view=view, options=options,

@@ -1,4 +1,4 @@
-{% from "_class_badge.html" import state %}
+{% from "_class_badge.html" import state, watch_out %}
 {% macro _cores(v) %}{{ "not available" if v is none else v | cores }}{% endmacro %}
 {% macro _gib(v) %}{{ "not available" if v is none else v | gib }}{% endmacro %}
 {% macro _cluster(r) %}<a href="/clusters/{{ r.site }}/{{ r.cluster_id }}">{{ r.name }}</a><br>{{ state(r, user.role == "admin") }}{% endmacro %}
@@ -6,10 +6,11 @@
 {% macro _pools(r) %}{% if r.pools_status == "ok" %}<span title="{{ r.pools | join(', ') }}">{{ r.pools | length }}</span>{% elif r.pools_status == "none" %}none{% else %}not collected{% endif %}{% endmacro %}
 {% macro _cpu(r) %}{{ _cores(r.cpu_alloc_m) }} / {{ _cores(r.cpu_req_m) }} / {{ _cores(r.cpu_used_m) }}{% endmacro %}
 {% macro _mem(r) %}{{ _gib(r.mem_alloc_b) }} / {{ _gib(r.mem_req_b) }} / {{ _gib(r.mem_used_b) }}{% endmacro %}
-{% macro _pvs(r) %}{{ r.pv_count }}{% if r.pv_count %} ({{ r.pv_bytes | size }}){% endif %}{% endmacro %}
-{% macro _floating(r) %}{% set f = r.floating %}<span title="LB {{ f.lb }}, external IP {{ f.external_ip }}, ingress LB {{ f.ingress_lb }}, node external {{ f.node_external }}, control plane {{ 1 if f.control_plane else 0 }}">{{ f.total }}</span>{% endmacro %}
-{% macro _lb(r) %}{{ r.floating.implementations | join(", ") if r.floating.implementations else "none" }}{% endmacro %}
-{% macro _watch_out(r) %}{% for f in r.flags %}<span class="badge {{ 'complexity' if f in r.complexity else 'watch' }}">{{ f }}</span>{% else %}none{% endfor %}{% endmacro %}
+{# a cluster without a successful collection (no profile) shows "not collected" for PVs, floating IPs, LB and Watch out #}
+{% macro _pvs(r) %}{% if not r.collected %}not collected{% else %}{{ r.pv_count }}{% if r.pv_count %} ({{ r.pv_bytes | size }}){% endif %}{% endif %}{% endmacro %}
+{% macro _floating(r) %}{% set f = r.floating %}{% if not r.collected %}not collected{% else %}<span title="LB {{ f.lb }}, external IP {{ f.external_ip }}, ingress LB {{ f.ingress_lb }}, node external {{ f.node_external }}, control plane {{ 1 if f.control_plane else 0 }}">{{ f.total }}</span>{% endif %}{% endmacro %}
+{% macro _lb(r) %}{% if not r.collected %}not collected{% else %}{{ r.floating.implementations | join(", ") if r.floating.implementations else "none" }}{% endif %}{% endmacro %}
+{% macro _watch_out(r) %}{% if not r.collected %}not collected{% else %}{{ watch_out(r.site, r.cluster_id, r.flags, r.complexity) }}{% endif %}{% endmacro %}
 
 {% macro cluster_list(rows, view) %}
 <p class="view-switch">

@@ -1,7 +1,9 @@
 import csv
 import io
 import json
+import re
 import shutil
+from contextlib import contextmanager
 from dataclasses import asdict
 from pathlib import Path
 
@@ -9,12 +11,30 @@ import pytest
 
 from inventory.collector.provisioning import parse_provisioning
 from inventory.collector.rules import load_rules
-from inventory.web.migration import assign_nodes, floating_ips, node_groups, site_overview, watch_out
+from inventory.web import queries
+from inventory.web.migration import FLAG_ANCHORS, assign_nodes, floating_ips, node_groups, site_overview, watch_out
 
 pytestmark = pytest.mark.live
 
 LOCAL_LINK = 'href="/clusters/dev/local"'
 CARD = 'class="card cluster"'
+
+
+@contextmanager
+def _client_on_copy(collected_db, tmp_path, open_db, change):
+    """Admin client on a copy of collected_db after change(conn) ran on the copy."""
+    from fastapi.testclient import TestClient
+
+    from inventory.web.app import create_app
+    from tests.conftest import TEST_PASSWORD, _login, _web_settings
+
+    shutil.copy(collected_db.db_path, tmp_path / "inventory.db")
+    s = _web_settings(tmp_path)
+    conn = open_db(s.db_path)
+    change(conn)
+    conn.commit()
+    with TestClient(create_app(s, None)) as c:
+        yield _login(c, s, "admin", TEST_PASSWORD)
 
 
 def _stored_flags(conn) -> list[str]:
@@ -106,9 +126,9 @@ def test_clusters_csv(admin_client_collected):
     local = next(r for r in rows if r["cluster_id"] == "local")
     assert "node-pinned-pv" in local["flags"].split("; ")
     assert int(local["floating_total"]) >= 1 and "floating_lb" in local
-    # the old Inventory CSV link still returns the cluster table
+    # the old Inventory CSV link still returns the old inventory table (see test_old_inventory_csv_columns)
     old = get("/inventory?format=csv&table=inventory")
-    assert old.status_code == 200 and "node-pinned-pv" in old.text
+    assert old.status_code == 200 and "complexity" in old.text.splitlines()[0].split(",")
 
 
 def test_site_overview_dev(collected_db, open_db, settings, dev_lists):
@@ -178,7 +198,7 @@ def test_cluster_page_sections(admin_client_collected):
     text = get("/clusters/dev/local").text
     headings = ("Nodes", "External networking", "Storage", "Databases", "Platform dependencies",
                 "Namespaces", "Custom annotations", "Usage per day", "Cluster labels")  # fmt: skip
-    at = [text.index(f"<h2>{h}") for h in headings]
+    at = [re.search(rf"<h2[^>]*>{h}", text).start() for h in headings]
     assert at == sorted(at)
     assert "kagent-postgresql" in text and "not visible to this app" in text
     nodes = get("/clusters/dev/local?format=csv&table=nodes")
@@ -236,3 +256,109 @@ def test_nav_links(admin_client_collected):
 def test_tables_js_served(admin_client_collected):
     assert admin_client_collected.get("/static/tables.js").status_code == 200
     assert '<script src="/static/tables.js"' in admin_client_collected.get("/").text
+
+
+def test_watch_out_flags_link_to_rows(admin_client_collected):
+    get = admin_client_collected.get
+    anchor = FLAG_ANCHORS["node-pinned-pv"]
+    link = f'href="/clusters/dev/local#{anchor}">node-pinned-pv</a>'
+    for page in ("/clusters", "/clusters?view=cards", "/clusters/dev/local"):
+        assert link in get(page).text, page
+    page = get("/clusters/dev/local").text
+    assert f'id="{anchor}"' in page
+    assert 'class="badge class"' not in page
+
+
+def test_cluster_page_has_every_flag_anchor(admin_client_collected):
+    page = admin_client_collected.get("/clusters/dev/local").text
+    for flag, anchor in FLAG_ANCHORS.items():
+        assert f'id="{anchor}"' in page, flag
+
+
+def test_never_collected_shows_not_collected(collected_db, tmp_path, open_db):
+    def drop_profile(conn):
+        conn.execute("DELETE FROM cluster_profile WHERE site='dev' AND cluster_id='local'")
+
+    with _client_on_copy(collected_db, tmp_path, open_db, drop_profile) as c:
+        table = c.get("/clusters").text
+        row = table[table.index(LOCAL_LINK) : table.index("</tr>", table.index(LOCAL_LINK))]
+        cells = re.findall(r"<td[^>]*>(.*?)</td>", row, re.S)
+        # cells after the cluster cell: Kubernetes, Nodes, Pools, OS, vCPU, Memory, PVs, Floating IPs, LB, Watch out
+        assert cells[-4:] == ["not collected"] * 4, cells
+        cards = c.get("/clusters?view=cards").text
+        for label in ("PVs", "Floating IPs", "LB", "Watch out"):
+            assert f"<dt>{label}</dt><dd>not collected</dd>" in cards, label
+        rows = list(csv.DictReader(io.StringIO(c.get("/clusters?format=csv").text)))
+        local = next(r for r in rows if r["cluster_id"] == "local")
+        for k in ("pv_count", "pv_bytes", "floating_total", "floating_lb", "lb_implementations", "flags"):
+            assert local[k] == "not collected", k
+
+
+def test_unparsable_pv_size(collected_db, tmp_path, open_db, settings):
+    def bad_size(conn):
+        conn.execute(
+            "UPDATE resources SET data = json_set(data, '$.spec.capacity.storage', 'not-a-size')"
+            " WHERE id = (SELECT min(id) FROM resources WHERE kind='persistentvolumes' AND cluster_id='local')"
+        )
+
+    with _client_on_copy(collected_db, tmp_path, open_db, bad_size) as c:
+        for page in ("/", "/clusters", "/clusters?flag=database", "/clusters?format=csv"):
+            assert c.get(page).status_code == 200, page
+    conn = open_db(tmp_path / "inventory.db", readonly=True)
+    before = site_overview(open_db(collected_db.db_path, readonly=True), load_rules(settings))["totals"]
+    after = site_overview(conn, load_rules(settings))["totals"]
+    assert after["pv_count"] == before["pv_count"] and after["pv_bytes"] < before["pv_bytes"]
+
+
+def test_node_external_only_is_not_external_ip(collected_db, tmp_path, open_db, settings):
+    copy = tmp_path / "copy.db"
+    shutil.copy(collected_db.db_path, copy)
+    conn = open_db(copy)
+    local = "resource_id IN (SELECT id FROM resources WHERE site='dev' AND cluster_id='local')"
+    conn.execute(f"DELETE FROM addresses WHERE role IN ('lb', 'ingress-lb', 'external-ip') AND {local}")
+    # keep one node address as node-external; dev nodes may report no ExternalIP, then a node InternalIP is used
+    keep = conn.execute(
+        f"SELECT resource_id, role, address FROM addresses WHERE role IN ('node-external', 'node-internal') AND {local}"
+        " ORDER BY role = 'node-internal', resource_id, address LIMIT 1"
+    ).fetchone()
+    conn.execute(f"DELETE FROM addresses WHERE role = 'node-external' AND {local}")
+    conn.execute(
+        "INSERT OR REPLACE INTO addresses (resource_id, role, address) VALUES (?, 'node-external', ?)",
+        (keep["resource_id"], keep["address"]),
+    )
+    # pinned loadBalancerIP values also feed the lb source; dev has no LoadBalancer services
+    assert conn.execute("SELECT count(*) FROM resources WHERE kind='services' AND cluster_id='local'"
+                        " AND json_extract(data, '$.spec.type') = 'LoadBalancer'").fetchone()[0] == 0  # fmt: skip
+    conn.commit()
+    rules = load_rules(settings)
+    f = floating_ips(conn, rules)[("dev", "local")]
+    assert f["node_external"] == 1 and f["total"] == 1 + (1 if f["control_plane"] else 0)
+    assert "external-ip" not in watch_out(conn, rules)[("dev", "local")]
+
+
+def test_floating_sources_add_up(collected_db, open_db, settings):
+    conn = open_db(collected_db.db_path, readonly=True)
+    for f in floating_ips(conn, load_rules(settings)).values():
+        sources = f["lb"] + f["external_ip"] + f["ingress_lb"] + f["node_external"]
+        assert sources == len(f["addresses"]) == f["total"] - (1 if f["control_plane"] else 0)
+
+
+def test_watch_out_one_cluster(collected_db, open_db, settings):
+    conn = open_db(collected_db.db_path, readonly=True)
+    rules = load_rules(settings)
+    one = watch_out(conn, rules, "dev", "local")
+    assert list(one) == [("dev", "local")]
+    assert one[("dev", "local")] == watch_out(conn, rules)[("dev", "local")]
+
+
+def test_old_inventory_csv_columns(admin_client_collected, collected_db, open_db):
+    conn = open_db(collected_db.db_path, readonly=True)
+    expected = list(queries.inventory_rows(conn)[0])
+    text = admin_client_collected.get("/clusters?format=csv&table=inventory").text
+    rows = list(csv.reader(io.StringIO(text)))
+    assert rows[0] == expected
+    local = dict(zip(rows[0], next(r for r in rows[1:] if r[rows[0].index("cluster_id")] == "local")))
+    assert local["complexity"] == json.dumps(_stored_flags(conn))
+    assert local["crd_group_list"].startswith("[")
+    old = admin_client_collected.get("/inventory?format=csv")
+    assert old.status_code == 200 and old.text.splitlines()[0] == text.splitlines()[0]

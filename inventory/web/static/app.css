@@ -35,13 +35,14 @@ button { cursor: pointer; }
 .login input { display: block; width: 100%; box-sizing: border-box; }
 #progress { display: inline-flex; gap: 0.5rem; align-items: center; }
 .badge { display: inline-block; padding: 0 0.4rem; border-radius: 0.6rem; background: #e3e8f0; font-size: 0.85rem; margin-right: 0.2rem; }
+a.badge { text-decoration: none; }
 .badge.class { background: #dbe7f7; }
 .badge.complexity { background: #efe3f7; }
 .badge.hostpath { background: #fff4d6; color: #8a5a00; }
 pre.cell { margin: 0; font-size: 0.8rem; white-space: pre-wrap; }
 nav details.tools { position: relative; }
 nav details.tools summary { cursor: pointer; color: #24569b; }
-nav details.tools div { position: absolute; z-index: 1; background: #fff; border: 1px solid #ddd; padding: 0.4rem 0.8rem; display: flex; flex-direction: column; gap: 0.3rem; }
+nav details.tools div { position: absolute; z-index: 10; background: #fff; border: 1px solid #ddd; padding: 0.4rem 0.8rem; display: flex; flex-direction: column; gap: 0.3rem; }
 nav details.tools div { box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12); white-space: nowrap; }
 .cluster-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr)); gap: 1rem; margin-bottom: 1rem; }
 .cluster-cards .card h3 { margin: 0 0 0.5rem; }

@@ -14,6 +14,7 @@ from fastapi.templating import Jinja2Templates
 from inventory.db.connection import connect
 from inventory.settings import Settings
 from inventory.web.auth import User, csrf_token, session_user
+from inventory.web.migration import FLAG_ANCHORS
 from inventory.web.queries import header_context
 
 COOKIE = "session"
@@ -56,6 +57,7 @@ def _size(b: int | None) -> str:
 
 
 templates.env.filters.update(dt=_dt, cores=_cores, gib=_gib, secs=_secs, size=_size)
+templates.env.globals["flag_anchors"] = FLAG_ANCHORS
 templates.env.globals["csv_url"] = lambda request, table: str(
     request.url.include_query_params(format="csv", table=table)
 )

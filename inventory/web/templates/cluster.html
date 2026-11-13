@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_csv.html" import csv_link with context %}
-{% from "_class_badge.html" import class_badge, state %}
+{% from "_class_badge.html" import state, watch_out %}
 {% macro na(v) %}{{ "not available" if v is none or v == "" else v }}{% endmacro %}
 {% macro _cores(v) %}{{ "not available" if v is none else v | cores }}{% endmacro %}
 {% macro _gib(v) %}{{ "not available" if v is none else v | gib }}{% endmacro %}
@@ -19,8 +19,8 @@
 </form>
 {% endif %}
 
-<h2>Summary</h2>
-<p>{{ class_badge(p.class if p else none) }} {{ state(p, user.role == "admin") if p }}</p>
+<h2 id="summary">Summary</h2>
+{% if p %}<p>{{ state(p, user.role == "admin") }}</p>{% endif %}
 <table class="facts">
   <tr><th>State</th><td>{{ na(c.state) }}</td></tr>
   <tr><th>Provider</th><td>{{ na(c.provider) }}</td></tr>
@@ -29,11 +29,11 @@
   <tr><th>vCPU alloc / req / used</th><td>{{ _cores(c.cpu_alloc_m) }} / {{ _cores(c.cpu_req_m) }} / {{ _cores(c.cpu_used_m) }}</td></tr>
   <tr><th>Memory GiB alloc / req / used</th><td>{{ _gib(c.mem_alloc_b) }} / {{ _gib(c.mem_req_b) }} / {{ _gib(c.mem_used_b) }}</td></tr>
   <tr><th>Last ok</th><td>{{ c.last_ok_at | dt if c.last_ok_at else "not available" }}</td></tr>
-  <tr><th>Watch out</th><td>{% for f in flags %}<span class="badge {{ 'complexity' if p and f in p.complexity else 'watch' }}">{{ f }}</span>{% else %}none{% endfor %}</td></tr>
+  <tr><th>Watch out</th><td>{{ watch_out(c.site, c.cluster_id, flags, p.complexity if p else []) }}</td></tr>
   {% if user.role == "admin" %}<tr><th>Last error</th><td class="error">{{ c.last_error or "none" }}</td></tr>{% endif %}
 </table>
 
-<h2>Nodes</h2>
+<h2 id="nodes">Nodes</h2>
 <p>{% if pools_status == "ok" %}Grouped by machine pool.{% elif pools_status == "none" %}No machine pools (custom or imported cluster), grouped by role.{% else %}Machine pools not collected, grouped by role.{% endif %}
    Nodes {{ csv_link("nodes") }}, groups {{ csv_link("pools") }}</p>
 <table>
@@ -65,7 +65,7 @@
   {% endfor %}
 </table>
 
-<h2>External networking</h2>
+<h2 id="external-networking">External networking</h2>
 <p>IPs that NSX assigns outside Kubernetes are not visible to this app.</p>
 <table class="facts">
   {% if floating %}
@@ -82,7 +82,7 @@
   <tr><th>CIDRs</th><td>{{ p.cidrs if p and p.cidrs else "not available" }}</td></tr>
 </table>
 
-<h3>LoadBalancer services</h3>
+<h3 id="lb-services">LoadBalancer services</h3>
 <p>{{ csv_link("lb_services") }}</p>
 <table>
   <tr><th>Namespace</th><th>Name</th><th>Addresses</th><th>Implementation</th><th>Signals</th></tr>
@@ -94,7 +94,7 @@
   {% endfor %}
 </table>
 
-<h3>Ingresses</h3>
+<h3 id="ingresses">Ingresses</h3>
 <p>{{ csv_link("ingresses") }}</p>
 <table>
   <tr><th>Namespace</th><th>Name</th><th>Hosts</th><th>Load balancer</th></tr>
@@ -105,7 +105,7 @@
   {% endfor %}
 </table>
 
-<h3>NodePort and external IP services</h3>
+<h3 id="nodeport-services">NodePort and external IP services</h3>
 <p>{{ csv_link("nodeport_services") }}</p>
 <table>
   <tr><th>Namespace</th><th>Name</th><th>Type</th><th>External addresses</th></tr>
@@ -128,8 +128,8 @@
 </table>
 </details>
 
-<h2>Storage</h2>
-<h3>Persistent volumes</h3>
+<h2 id="storage">Storage</h2>
+<h3 id="pvs">Persistent volumes</h3>
 <p>{{ csv_link("pvs") }}</p>
 <table>
   <tr><th>Name</th><th>Capacity</th><th>Storage class</th><th>Source</th><th>Node-pinned</th><th>Reclaim</th><th>Phase</th><th>Claim</th></tr>
@@ -143,7 +143,7 @@
   {% endfor %}
 </table>
 
-<h3>Persistent volume claims</h3>
+<h3 id="pvcs">Persistent volume claims</h3>
 <p>{{ csv_link("pvcs") }}</p>
 <table>
   <tr><th>Namespace</th><th>Name</th><th>Storage class</th><th>Access modes</th><th>Requested</th><th>Capacity</th><th>Phase</th>
@@ -158,7 +158,7 @@
   {% endfor %}
 </table>
 
-<h2>Databases and stateful workloads</h2>
+<h2 id="databases">Databases and stateful workloads</h2>
 <p>{{ csv_link("databases") }}</p>
 <table>
   <tr><th>Engine</th><th>Namespace</th><th>Kind</th><th>Name</th><th>Found by</th></tr>
@@ -170,7 +170,7 @@
   {% endfor %}
 </table>
 
-<h3>StatefulSets</h3>
+<h3 id="statefulsets">StatefulSets</h3>
 <p>{{ csv_link("statefulsets") }}</p>
 <table>
   <tr><th>Namespace</th><th>Name</th><th>Replicas</th><th>Volume claim templates</th></tr>
@@ -194,7 +194,7 @@
   {% endfor %}
 </table>
 
-<h3>Custom CRD groups</h3>
+<h3 id="crd-groups">Custom CRD groups</h3>
 <p>{{ csv_link("crd_groups") }}</p>
 <table>
   <tr><th>Group</th><th>CRDs</th></tr>
@@ -205,7 +205,7 @@
   {% endfor %}
 </table>
 
-<h3>Admission webhooks</h3>
+<h3 id="webhooks">Admission webhooks</h3>
 <p>{{ csv_link("webhooks") }}</p>
 <table>
   <tr><th>Type</th><th>Name</th><th>Webhooks</th><th>Failure policies</th><th>Service namespaces</th><th>URL based</th><th>Custom</th></tr>
@@ -217,7 +217,7 @@
   {% endfor %}
 </table>
 
-<h2>Namespaces</h2>
+<h2 id="namespaces">Namespaces</h2>
 <p>{{ csv_link("namespaces") }}</p>
 <table>
   <tr><th>Namespace</th><th>System</th><th>Workloads</th><th>StatefulSets</th><th>Bound PVCs</th><th>PVC size</th>

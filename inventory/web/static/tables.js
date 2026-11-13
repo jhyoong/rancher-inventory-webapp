@@ -1,11 +1,13 @@
 (function () {
-  var UNITS = { B: 1, KiB: 1024, MiB: 1048576, GiB: 1073741824, TiB: 1099511627776 };
+  // Sizes as shown by the app (KiB, MiB) and as Kubernetes quantities (Ki, Mi, k, M), all in bytes.
+  var UNITS = { "": 1, Ki: Math.pow(1024, 1), Mi: Math.pow(1024, 2), Gi: Math.pow(1024, 3), Ti: Math.pow(1024, 4),
+                Pi: Math.pow(1024, 5), Ei: Math.pow(1024, 6), k: 1e3, M: 1e6, G: 1e9, T: 1e12, P: 1e15, E: 1e18 };
   var LAST = ["", "-", "not available", "not collected"];
 
   function key(text) {
     var t = text.trim();
     if (LAST.indexOf(t.toLowerCase()) !== -1) return { last: true };
-    var m = t.match(/^(-?\d+(?:\.\d+)?)\s*(B|KiB|MiB|GiB|TiB)\b/);
+    var m = t.match(/^(-?\d+(?:\.\d+)?)(?![\d.])\s*(Ki|Mi|Gi|Ti|Pi|Ei|k|M|G|T|P|E|)B?(?![A-Za-z])/);
     if (m) return { num: parseFloat(m[1]) * UNITS[m[2]] };
     m = t.match(/^[-+]?\d+(?:\.\d+)?/);
     if (m) return { num: parseFloat(m[0]) };

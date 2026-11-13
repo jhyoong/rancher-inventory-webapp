@@ -74,3 +74,23 @@ def test_check_config_reports_provisioning(settings):
     else:
         assert checks[0].provisioning == 200
         assert "provisioning clusters (optional): readable" in text
+
+
+@pytest.mark.live
+def test_read_skips_malformed_item(live_loop, live_client, caplog):
+    class WithMalformedItem:
+        """The live client, with a copy of the first real item whose machine pools are malformed added."""
+
+        async def list_kind(self, cluster, path):
+            items = await live_client.list_kind(cluster, path)
+            bad = copy.deepcopy(items[0])
+            bad["status"]["clusterName"] = "malformed-copy"
+            bad["spec"]["rkeConfig"] = {"machinePools": ["not a pool"]}
+            return [bad, *items]
+
+    result = live_loop.run_until_complete(read_provisioning(WithMalformedItem()))
+    if result.status == "forbidden":
+        pytest.skip("P1 not applied: provisioning clusters forbidden (HTTP 403)")
+    assert result.status == "ok"
+    assert "malformed-copy" not in result.clusters and "local" in result.clusters
+    assert "skipped malformed provisioning cluster" in caplog.text
