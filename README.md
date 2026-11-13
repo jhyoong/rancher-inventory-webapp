@@ -17,9 +17,11 @@ Status: plans 1 and 2 are built and tested on the dev Mac against the dev Ranche
 7. [Airgap install](#airgap-install)
 8. [Backup, restore and upgrade](#backup-restore-and-upgrade)
 9. [Discovery export](#discovery-export)
-10. [Known behaviour](#known-behaviour)
-11. [Dev cluster notes](#dev-cluster-notes)
-12. [Run on the dev Mac](#run-on-the-dev-mac)
+10. [Migration views](#migration-views)
+11. [Rules for networking and databases](#rules-for-networking-and-databases)
+12. [Known behaviour](#known-behaviour)
+13. [Dev cluster notes](#dev-cluster-notes)
+14. [Run on the dev Mac](#run-on-the-dev-mac)
 
 ## What you need
 
@@ -148,7 +150,13 @@ Do not bind it on the `local` cluster unless you want Rancher's own cluster in t
 
 ### Step 4. Allow reading cluster network settings (optional)
 
-The cluster CIDRs and CNI (plan section 6.4) are read from the `provisioning.cattle.io` cluster objects on the Rancher local cluster. Skip this step if you do not need them; those columns stay empty. Imported clusters do not have these values anyway.
+The machine pools (with their labels), the CNI and the cluster CIDRs (plan section 6.4) are read from the `provisioning.cattle.io` cluster objects on the Rancher local cluster. This step is optional. Without it:
+
+- machine pools show "not collected" on the cluster page;
+- the CNI is guessed from the cluster's DaemonSets (see `cni_daemonsets` in [Rules for networking and databases](#rules-for-networking-and-databases));
+- pod ranges come from the node `podCIDR` values.
+
+Imported clusters do not have provisioning data, so pools stay "not collected" there even with this step.
 
 ```yaml
 apiVersion: management.cattle.io/v3
@@ -390,6 +398,43 @@ Upgrade: load the new image tar, stop and remove the container, and start it aga
 ## Discovery export
 
 `/export/discovery` (admins) or `inventory export-discovery --out /data/export` builds a `tar.gz` with the same per-cluster CSV files and column names as `k8s-discovery.sh` 1.0.0, plus `fleet_summary.csv`. Names are hashed with `EXPORT_SALT`; the same salt gives the same hashes as the script. Before the file is offered, a self-check looks for IPv4 addresses, the `EXPORT_SENSITIVE_STRINGS`, and real cluster, node, namespace and workload names in the hashed columns. Any hit blocks the download and lists the file and column. The hash-to-name map is stored in the database and downloaded separately from `/export/discovery/name-map.csv`; it is never in the bundle.
+
+## Migration views
+
+The pages are built for planning a move from VMware and NSX to Nutanix NKP.
+
+- **Overview (`/`)**: a site picker, fleet totals, charts (for example node operating systems) and a list of clusters that switches between Table and Cards.
+- **Clusters (`/clusters`)**: the same Table and Cards views, with filters for flags and for labels (cluster, node and machine pool labels).
+- **Cluster page (`/clusters/<site>/<cluster>`)**: a migration sheet with nodes grouped by machine pool, CNI, CIDRs, databases found, and the Watch out flags for that cluster.
+- **Watch out flags** mark things that need a decision before a move, for example `node-pinned-pv`, `database`, `external-ip`, `nodeport`, `host-network`, `k8s<1.32` and `privileged/hostpath`.
+- **Floating IPs**: the count of LoadBalancer and external IPs that Kubernetes reports on Services. IPs that NSX assigns outside Kubernetes (for example SNAT or manual NAT rules) are not visible to the app and are not in this count.
+- **Old URLs** `/inventory`, `/helm`, `/crds`, `/annotations` and `/namespaces` redirect (307) to the new pages and keep the query string, so saved links still work.
+
+`tests/fixtures/real/` holds fixtures from real clusters. It is git-ignored and exists only on the dev Mac. Tests that need it are skipped when it is missing ("P2 fixtures missing").
+
+## Rules for networking and databases
+
+The built-in rules are in [config/defaults/rules.yaml](config/defaults/rules.yaml). Two sections drive the migration views.
+
+`network`:
+
+| Key | What it does |
+| --- | --- |
+| `lb_implementations` | Which load balancer stack serves a Service, matched by `loadBalancerClass` (`classes`) or annotation domain (`annotation_domains`) |
+| `pinned_ip_annotations` | Annotations that pin a Service to a fixed IP |
+| `shared_ip_annotations` | Annotations that let Services share one IP |
+| `vendor_annotation_domains` | Annotation domains reported as vendor-specific |
+| `cni_daemonsets` | CNI name to the DaemonSet names that identify it |
+
+`databases`:
+
+| Key | What it does |
+| --- | --- |
+| `images` | Engine name to image repository patterns (fnmatch) |
+| `exclude` | Image patterns to ignore, for example `*exporter*` |
+| `operator_crd_groups` | Engine name to the CRD API groups of its operators |
+
+To extend a list, copy `config/defaults/rules.yaml` to `config/rules.yaml` and edit it. An override file that sets `network` or `databases` replaces that whole section. Any sub-key you leave out becomes empty, so copy the full section and then change it. If the override file does not set a section, the built-in defaults are used for it.
 
 ## Known behaviour
 
