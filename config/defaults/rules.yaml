@@ -11,6 +11,10 @@ annotations:
     - field.cattle.io/projectId
     - meta.helm.sh/release-name
     - meta.helm.sh/release-namespace
+    - ncp
+    - nsx.vmware.com
+    - ako.vmware.com
+    - avi.vmware.com
     - metallb.universe.tf
     - kube-vip.io
     - nginx.ingress.kubernetes.io
@@ -84,3 +88,46 @@ optional_collectors:
   deprecated_api_metrics: {enabled: false}   # apiserver_requested_deprecated_apis from /metrics
   secret_types:           {enabled: false}   # count of Secrets per type (table view, no data)
   nginx_config_keys:      {enabled: false}   # keys of ingress-nginx ConfigMaps, never values
+
+# Networking facts for the migration view. Domains are annotation key prefixes.
+network:
+  lb_implementations:     # which LB stack serves a Service, by loadBalancerClass or annotation domain
+    nsx-ncp:  {classes: [], annotation_domains: [ncp, nsx.vmware.com]}
+    avi-ako:  {classes: [ako.vmware.com/avi-lb], annotation_domains: [ako.vmware.com, avi.vmware.com]}
+    metallb:  {classes: [metallb.io/metallb], annotation_domains: [metallb.universe.tf, metallb.io]}
+    kube-vip: {classes: [kube-vip.io/kube-vip-class], annotation_domains: [kube-vip.io]}
+  pinned_ip_annotations: [metallb.universe.tf/loadBalancerIPs, metallb.io/loadBalancerIPs, kube-vip.io/loadbalancerIPs]
+  shared_ip_annotations: [metallb.universe.tf/allow-shared-ip, metallb.io/allow-shared-ip]
+  vendor_annotation_domains: [ncp, nsx.vmware.com, ako.vmware.com, avi.vmware.com]
+  cni_daemonsets:         # CNI name -> DaemonSet names that identify it
+    calico: [calico-node]
+    canal: [rke2-canal, canal]
+    cilium: [cilium]
+    flannel: [kube-flannel-ds, kube-flannel]
+    antrea: [antrea-agent]
+
+# Database detection for the migration view. Patterns are fnmatch on the image repository name.
+databases:
+  exclude: ["*exporter*"]
+  images:
+    postgresql: ["postgres", "postgres-*", "postgresql*", "*-postgresql", "cloudnative-pg*", "spilo*", "patroni*"]
+    mysql: ["mysql*", "percona-server*", "percona-xtradb*"]
+    mariadb: ["mariadb*"]
+    mongodb: ["mongo", "mongo-*", "mongodb*", "percona-server-mongodb*"]
+    redis: ["redis", "redis-*", "valkey*"]
+    elasticsearch: ["elasticsearch*", "opensearch*"]
+    cassandra: ["cassandra*", "scylla*"]
+    kafka: ["kafka*", "cp-kafka*", "zookeeper*"]
+    clickhouse: ["clickhouse*"]
+    cockroachdb: ["cockroach*"]
+    influxdb: ["influxdb*"]
+    rabbitmq: ["rabbitmq*"]
+    minio: ["minio", "minio-*"]
+    etcd: ["etcd"]
+  operator_crd_groups:    # engine -> CRD API groups of its operators
+    postgresql: [postgresql.cnpg.io, pgv2.percona.com, acid.zalan.do, postgres-operator.crunchydata.com]
+    mysql: [ps.percona.com, pxc.percona.com, mysql.oracle.com]
+    mongodb: [psmdb.percona.com, mongodbcommunity.mongodb.com]
+    redis: [redis.redis.opstreelabs.in, databases.spotahome.com]
+    elasticsearch: [elasticsearch.k8s.elastic.co]
+    kafka: [kafka.strimzi.io]

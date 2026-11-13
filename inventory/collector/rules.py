@@ -18,6 +18,8 @@ class Rules:
     platform_roles: dict = field(default_factory=dict)
     complexity: dict[str, int] = field(default_factory=dict)
     optional_collectors: dict[str, dict] = field(default_factory=dict)
+    network: dict = field(default_factory=dict)
+    databases: dict = field(default_factory=dict)
 
 
 def _read_yaml(path: Path) -> dict:
@@ -73,6 +75,36 @@ def load_rules(settings) -> Rules:
             out[key] = bool(item) if key in flags else strings(item, f"{name}.{key}")
         return out
 
+    def mapping(value, name: str) -> dict:
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            raise ConfigError(f"{name} must be a mapping in {path}")
+        return value
+
+    def section(value, name: str, lists: tuple[str, ...], maps: tuple[str, ...], extra: tuple[str, ...] = ()) -> dict:
+        """A mapping whose keys are fixed: `lists` hold string lists, `maps` hold name -> string list."""
+        value = mapping(value, name)
+        unknown = [k for k in value if k not in lists + maps + extra]
+        if unknown:
+            raise ConfigError(f"unknown key {unknown[0]!r} in {name} in {path}")
+        out: dict = {k: strings(value.get(k), f"{name}.{k}") for k in lists}
+        for k in maps:
+            out[k] = string_map(value.get(k), f"{name}.{k}")
+        return out
+
+    network = section(
+        data.get("network"), "network",
+        ("pinned_ip_annotations", "shared_ip_annotations", "vendor_annotation_domains"),
+        ("cni_daemonsets",), ("lb_implementations",),
+    )  # fmt: skip
+    lbs = mapping(mapping(data.get("network"), "network").get("lb_implementations"), "network.lb_implementations")
+    network["lb_implementations"] = {
+        name: section(cfg, f"network.lb_implementations.{name}", ("classes", "annotation_domains"), ())
+        for name, cfg in lbs.items()
+    }
+    databases = section(data.get("databases"), "databases", ("exclude",), ("images", "operator_crd_groups"))
+
     complexity = data.get("complexity") or {}
     if not isinstance(complexity, dict):
         raise ConfigError(f"complexity must be a mapping in {path}")
@@ -99,6 +131,8 @@ def load_rules(settings) -> Rules:
 
     return Rules(
         optional_collectors=optional,
+        network=network,
+        databases=databases,
         complexity=complexity,
         rancher_generated=string_map(data.get("rancher_generated"), "rancher_generated"),
         platform_roles=string_map(data.get("platform_roles"), "platform_roles", ("helm_in_system_namespace",)),
