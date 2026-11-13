@@ -269,7 +269,8 @@ def _watch_out(
             r_args,
         ),
         "database": {k for k, hits in dbs.items() if hits},
-        "external-ip": {k for k, f in floating.items() if f["total"] > 0},
+        # LB, externalIPs, ingress LB and node external addresses; the control plane endpoint does not count
+        "external-ip": {k for k, f in floating.items() if f["addresses"]},
         "nodeport": _clusters_with(
             conn,
             f"{base} {_USER_NS} WHERE r.kind = 'services'"

@@ -6,7 +6,7 @@ import shutil
 import pytest
 
 from inventory.collector.rules import load_rules
-from inventory.web.migration import watch_out
+from inventory.web.migration import floating_ips, watch_out
 
 pytestmark = pytest.mark.live
 
@@ -39,6 +39,20 @@ def test_not_collected_flag(collected_db, tmp_path, open_db, settings):
         " AND run_id = (SELECT max(run_id) FROM run_kinds WHERE site='dev' AND cluster_id='local') LIMIT 1)"
     )
     assert "not-collected" in watch_out(conn, load_rules(settings))[("dev", "local")]
+
+
+def test_external_ip_ignores_control_plane(collected_db, tmp_path, open_db, settings):
+    copy = tmp_path / "copy.db"
+    shutil.copy(collected_db.db_path, copy)
+    conn = open_db(copy)
+    conn.execute("UPDATE clusters SET api_endpoint = '192.168.50.200' WHERE site='dev' AND cluster_id='local'")
+    conn.execute(
+        "DELETE FROM addresses WHERE role IN ('lb', 'ingress-lb', 'external-ip', 'node-external')"
+        " AND resource_id IN (SELECT id FROM resources WHERE site='dev' AND cluster_id='local')"
+    )
+    rules = load_rules(settings)
+    assert floating_ips(conn, rules)[("dev", "local")]["total"] == 1
+    assert "external-ip" not in watch_out(conn, rules)[("dev", "local")]
 
 
 def test_clusters_page_table_and_cards(admin_client_collected, dev_lists):
