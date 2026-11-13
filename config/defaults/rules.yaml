@@ -16,6 +16,7 @@ annotations:
     - ako.vmware.com
     - avi.vmware.com
     - metallb.universe.tf
+    - metallb.io
     - kube-vip.io
     - nginx.ingress.kubernetes.io
     - cert-manager.io

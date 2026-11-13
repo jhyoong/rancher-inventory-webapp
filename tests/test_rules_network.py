@@ -11,6 +11,7 @@ def test_defaults_load(settings):
     assert rules.databases["images"]["postgresql"][0] == "postgres"
     assert "calico-node" in rules.network["cni_daemonsets"]["calico"]
     assert "nsx.vmware.com" in rules.keep
+    assert "metallb.io" in rules.keep
 
 
 def override_settings(monkeypatch, tmp_path, text):
