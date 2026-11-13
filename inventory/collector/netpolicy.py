@@ -13,6 +13,7 @@ def derive_service(obj: dict) -> dict:
         "node_ports": sum(1 for p in spec.get("ports") or [] if isinstance(p, dict) and p.get("nodePort")),
         "external_traffic_policy": spec.get("externalTrafficPolicy"),
         "lb_class": spec.get("loadBalancerClass"),
+        "source_ranges": len(spec.get("loadBalancerSourceRanges") or []),
         "ip_families": list(spec.get("ipFamilies") or []),
         "session_affinity": spec.get("sessionAffinity"),
         "annotation_keys": sorted(_ann(obj)),
