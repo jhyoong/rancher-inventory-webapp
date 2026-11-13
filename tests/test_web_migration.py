@@ -184,3 +184,18 @@ def test_cluster_page_sections(admin_client_collected):
     nodes = get("/clusters/dev/local?format=csv&table=nodes")
     assert nodes.status_code == 200
     assert next(csv.reader(io.StringIO(nodes.text)))[0] == "name"
+
+
+def test_cluster_csv_tables(admin_client_collected, dev_lists):
+    get = admin_client_collected.get
+
+    def table(query: str) -> list[dict]:
+        return list(csv.DictReader(io.StringIO(get(f"/clusters/dev/local?format=csv{query}").text)))
+
+    # services keeps its old meaning: every service of the cluster
+    assert {r["name"] for r in table("&table=services")} == {s["metadata"]["name"] for s in dev_lists["services"]}
+    assert "kagent-ui" in {r["name"] for r in table("&table=nodeport_services")}
+    # a bare CSV link returns namespaces, as before the migration sheet
+    bare = get("/clusters/dev/local?format=csv").text.splitlines()[0]
+    assert bare == get("/clusters/dev/local?format=csv&table=namespaces").text.splitlines()[0]
+    assert "namespace" in bare.split(",")

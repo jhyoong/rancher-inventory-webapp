@@ -79,7 +79,7 @@
   {% endif %}
   <tr><th>Control plane endpoint</th><td>{{ floating.control_plane if floating and floating.control_plane else "not available" }}</td></tr>
   <tr><th>CNI</th><td>{{ p.cni if p and p.cni else "not available" }}</td></tr>
-  <tr><th>CIDRs</th><td>{{ p.cidrs if p else "not available" }}</td></tr>
+  <tr><th>CIDRs</th><td>{{ p.cidrs if p and p.cidrs else "not available" }}</td></tr>
 </table>
 
 <h3>LoadBalancer services</h3>
@@ -106,15 +106,27 @@
 </table>
 
 <h3>NodePort and external IP services</h3>
-<p>{{ csv_link("services") }}</p>
+<p>{{ csv_link("nodeport_services") }}</p>
 <table>
   <tr><th>Namespace</th><th>Name</th><th>Type</th><th>External addresses</th></tr>
+  {% for s in nodeport_services %}
+  <tr><td>{{ s.namespace }}</td><td>{{ s.name }}</td><td>{{ na(s.type) }}</td><td>{{ s.addresses or "none" }}</td></tr>
+  {% else %}
+  <tr><td colspan="4">None.</td></tr>
+  {% endfor %}
+</table>
+
+<details><summary>All services ({{ services | length }})</summary>
+<p>{{ csv_link("services") }}</p>
+<table>
+  <tr><th>Namespace</th><th>Name</th><th>Type</th><th>Addresses</th></tr>
   {% for s in services %}
   <tr><td>{{ s.namespace }}</td><td>{{ s.name }}</td><td>{{ na(s.type) }}</td><td>{{ s.addresses or "none" }}</td></tr>
   {% else %}
   <tr><td colspan="4">None.</td></tr>
   {% endfor %}
 </table>
+</details>
 
 <h2>Storage</h2>
 <h3>Persistent volumes</h3>

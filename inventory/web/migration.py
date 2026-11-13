@@ -595,9 +595,9 @@ def cluster_sheet(conn: sqlite3.Connection, rules: Rules, site: str, cluster_id:
     pvcs = queries.pvcs(conn, [], site=site, cluster_id=cluster_id)
     for pvc in pvcs:
         pvc["node_pinned"] = (pvc["namespace"], pvc["name"]) in pinned_claims
-    services = [
-        s for s in queries.cluster_services(conn, site, cluster_id)
-        if s["type"] == "NodePort" or (s["type"] != "LoadBalancer" and s["addresses"])
+    services = queries.cluster_services(conn, site, cluster_id)
+    nodeport_services = [
+        s for s in services if s["type"] == "NodePort" or (s["type"] != "LoadBalancer" and s["addresses"])
     ]  # fmt: skip
     webhooks = queries.webhooks(conn, site=site, cluster_id=cluster_id)
     for w in webhooks:
@@ -629,6 +629,7 @@ def cluster_sheet(conn: sqlite3.Connection, rules: Rules, site: str, cluster_id:
             "pools": [{k: v for k, v in g.items() if k != "nodes"} | {"node_count": len(g["nodes"])} for g in groups],
             "lb_services": lb_services(conn, rules, site, cluster_id),
             "services": services,
+            "nodeport_services": nodeport_services,
             "pvs": pvs,
             "pvcs": pvcs,
             "databases": [{"engine": h["engine"], "namespace": h.get("namespace"), "kind": h.get("kind"),
