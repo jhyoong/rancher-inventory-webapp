@@ -605,6 +605,18 @@ def annotation_objects(conn, key: str, limit: int = 5000) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def cluster_annotations(conn, site: str, cluster_id: str) -> list[dict]:
+    """Custom annotations on the objects of one cluster."""
+    rows = conn.execute(
+        """SELECT r.kind, r.namespace, r.name, a.key, a.value
+           FROM resource_annotations a JOIN resources r ON r.id = a.resource_id
+           WHERE r.site = ? AND r.cluster_id = ? AND a.custom = 1
+           ORDER BY r.kind, r.namespace, r.name, a.key""",
+        (site, cluster_id),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
 # ---- cluster page extras ----
 
 
@@ -730,7 +742,10 @@ STORAGE_FLAGS = {
 }
 
 
-def pvcs(conn, flags: list[str], source: str = "", storage_class: str = "", limit: int = PAGE_LIMIT) -> list[dict]:
+def pvcs(
+    conn, flags: list[str], source: str = "", storage_class: str = "", limit: int = PAGE_LIMIT,
+    site: str = "", cluster_id: str = "",
+) -> list[dict]:
     bad = set(flags) - set(STORAGE_FLAGS)
     if bad:
         raise ValueError(f"unknown filter: {', '.join(sorted(bad))}")
@@ -742,6 +757,7 @@ def pvcs(conn, flags: list[str], source: str = "", storage_class: str = "", limi
     if storage_class:
         parts.append("json_extract(r.data, '$.spec.storageClassName') = :storage_class")
         params["storage_class"] = storage_class
+    parts += _cluster_scope(params, site, cluster_id)
     rows = conn.execute(
         f"""SELECT r.site, c.name AS cluster, r.cluster_id, r.namespace, r.name,
                    json_extract(r.data, '$.spec.storageClassName') AS storage_class,
@@ -765,9 +781,23 @@ def pvcs(conn, flags: list[str], source: str = "", storage_class: str = "", limi
     return [dict(r) for r in rows]
 
 
-def pvs(conn, limit: int = PAGE_LIMIT) -> list[dict]:
+def _cluster_scope(params: dict, site: str = "", cluster_id: str = "") -> list[str]:
+    """WHERE parts for an optional site and cluster filter on resources r, with their named params."""
+    parts = []
+    if site:
+        parts.append("r.site = :site")
+        params["site"] = site
+    if cluster_id:
+        parts.append("r.cluster_id = :cluster_id")
+        params["cluster_id"] = cluster_id
+    return parts
+
+
+def pvs(conn, limit: int = PAGE_LIMIT, site: str = "", cluster_id: str = "") -> list[dict]:
+    params: dict = {"limit": limit}
+    where = "".join(f" AND {p}" for p in _cluster_scope(params, site, cluster_id))
     rows = conn.execute(
-        """SELECT r.site, c.name AS cluster, r.cluster_id, r.name,
+        f"""SELECT r.site, c.name AS cluster, r.cluster_id, r.name,
                   json_extract(r.data, '$.spec.capacity.storage') AS capacity,
                   json_extract(r.data, '$.spec.storageClassName') AS storage_class,
                   json_extract(r.data, '$.source') AS source, json_extract(r.data, '$.pinned') AS pinned,
@@ -775,8 +805,8 @@ def pvs(conn, limit: int = PAGE_LIMIT) -> list[dict]:
                   json_extract(r.data, '$.spec.claimRef.namespace') AS claim_namespace,
                   json_extract(r.data, '$.spec.claimRef.name') AS claim_name
            FROM resources r JOIN clusters c ON c.site = r.site AND c.cluster_id = r.cluster_id
-           WHERE r.kind = 'persistentvolumes' ORDER BY r.site, c.name, r.name LIMIT ?""",
-        (limit,),
+           WHERE r.kind = 'persistentvolumes'{where} ORDER BY r.site, c.name, r.name LIMIT :limit""",
+        params,
     ).fetchall()
     return [dict(r) for r in rows]
 
@@ -828,14 +858,16 @@ def _json_rows(conn, sql: str, params=()) -> list[dict]:
     return [dict(r) for r in conn.execute(sql, params).fetchall()]
 
 
-def webhooks(conn, limit: int = PAGE_LIMIT) -> list[dict]:
+def webhooks(conn, limit: int = PAGE_LIMIT, site: str = "", cluster_id: str = "") -> list[dict]:
+    params: dict = {"limit": limit}
+    where = "".join(f" AND {p}" for p in _cluster_scope(params, site, cluster_id))
     rows = _json_rows(
         conn,
-        """SELECT r.site, c.name AS cluster, r.cluster_id, r.kind, r.name, r.data
-           FROM resources r JOIN clusters c ON c.site = r.site AND c.cluster_id = r.cluster_id
-           WHERE r.kind IN ('mutatingwebhookconfigurations', 'validatingwebhookconfigurations')
-           ORDER BY r.site, c.name, r.kind, r.name LIMIT ?""",
-        (limit,),
+        f"""SELECT r.site, c.name AS cluster, r.cluster_id, r.kind, r.name, r.data
+            FROM resources r JOIN clusters c ON c.site = r.site AND c.cluster_id = r.cluster_id
+            WHERE r.kind IN ('mutatingwebhookconfigurations', 'validatingwebhookconfigurations'){where}
+            ORDER BY r.site, c.name, r.kind, r.name LIMIT :limit""",
+        params,
     )
     for r in rows:
         r.update(json.loads(r.pop("data")))

@@ -8,7 +8,8 @@ from inventory.collector.annotations import matches
 from inventory.collector.classify import is_system_namespace
 from inventory.collector.rollup import COMPLEXITY_FLAGS
 from inventory.collector.rules import Rules
-from inventory.collector.units import parse_bytes
+from inventory.collector.units import parse_bytes, parse_cpu
+from inventory.web import queries
 from inventory.web.queries import FLAG_COLUMNS, inventory_rows
 
 SERVICE_SIGNALS = ("pinned-ip", "local-traffic-policy", "source-ranges", "shared-ip", "vendor-annotations")
@@ -482,3 +483,160 @@ def flat_row(row: dict) -> dict:
         else:
             out[k] = v
     return out
+
+
+# ---- cluster page ----
+
+BUILTIN_LABEL_PREFIXES = ("kubernetes.io/", "beta.kubernetes.io/", "node-role.kubernetes.io/", "node.kubernetes.io/")
+
+
+def _quantity(parse, value) -> int | None:
+    try:
+        return parse(value) if value else None
+    except (ArithmeticError, ValueError):
+        return None
+
+
+def assign_nodes(nodes: list[dict], pools: list[dict], prov_name: str | None) -> list[dict]:
+    """Group nodes by machine pool (Rancher names machines <prov_name>-<pool>-...), the rest by role set."""
+    groups = [
+        {"kind": "pool", "name": p["name"], "quantity": p["quantity"], "roles": p["roles"], "labels": p["labels"],
+         "taints": p["taints"], "machine_config_kind": p["machine_config_kind"], "nodes": []}
+        for p in pools
+    ]  # fmt: skip
+    # longest prefix first, so pool "worker" does not take nodes of pool "worker-gpu"
+    by_prefix = sorted(((f"{prov_name}-{g['name']}-", g) for g in groups if prov_name), key=lambda x: -len(x[0]))
+    by_role: dict[str, dict] = {}
+    for n in nodes:
+        group = next((g for prefix, g in by_prefix if n["name"].startswith(prefix)), None)
+        if group is None:
+            name = "/".join(n["roles"]) or "no role"
+            group = by_role.setdefault(
+                name,
+                {"kind": "role", "name": name, "quantity": 0, "roles": n["roles"], "labels": {}, "taints": [],
+                 "machine_config_kind": None, "nodes": []},
+            )  # fmt: skip
+            group["quantity"] += 1
+            group["taints"] = sorted({*group["taints"], *n.get("taints", [])})
+        group["nodes"].append(n)
+    return groups + [by_role[k] for k in sorted(by_role)]
+
+
+def node_groups(conn: sqlite3.Connection, site: str, cluster_id: str) -> dict:
+    """Nodes of one cluster grouped by machine pool or role, with the cluster's pools_status."""
+    c = conn.execute("SELECT pools_status, prov_name FROM clusters WHERE site = ? AND cluster_id = ?", (site, cluster_id))
+    cluster = c.fetchone()
+    pools = [
+        {"name": p["name"], "quantity": p["quantity"], "roles": json.loads(p["roles"] or "[]"),
+         "labels": json.loads(p["labels"] or "{}"), "taints": json.loads(p["taints"] or "[]"),
+         "machine_config_kind": p["machine_config_kind"]}
+        for p in conn.execute(
+            "SELECT * FROM machine_pools WHERE site = ? AND cluster_id = ? ORDER BY name", (site, cluster_id)
+        )
+    ]  # fmt: skip
+    labels: dict[int, dict] = {}
+    for r in conn.execute(
+        """SELECT l.resource_id, l.key, l.value FROM resource_labels l JOIN resources r ON r.id = l.resource_id
+           WHERE r.site = ? AND r.cluster_id = ? AND r.kind = 'nodes' ORDER BY l.key""",
+        (site, cluster_id),
+    ):
+        labels.setdefault(r["resource_id"], {})[r["key"]] = r["value"]
+    nodes = []
+    for r in conn.execute(
+        "SELECT id, name, data FROM resources WHERE site = ? AND cluster_id = ? AND kind = 'nodes' ORDER BY name",
+        (site, cluster_id),
+    ):
+        data = json.loads(r["data"])
+        status = data.get("status") or {}
+        info = status.get("nodeInfo") or {}
+        capacity = status.get("capacity") or {}
+        node_labels = labels.get(r["id"], {})
+        nodes.append(
+            {
+                "name": r["name"],
+                "internal_ip": next(
+                    (a.get("address") for a in status.get("addresses") or [] if a.get("type") == "InternalIP"), None
+                ),
+                "os": info.get("osImage"), "kernel": info.get("kernelVersion"),
+                "runtime": info.get("containerRuntimeVersion"), "arch": info.get("architecture"),
+                "ready": data.get("ready"),
+                "cpu_m": _quantity(parse_cpu, capacity.get("cpu")),
+                "mem_b": _quantity(parse_bytes, capacity.get("memory")),
+                "roles": data.get("roles") or [], "taints": data.get("taints") or [],
+                "labels_builtin": {k: v for k, v in node_labels.items() if k.startswith(BUILTIN_LABEL_PREFIXES)},
+                "labels_other": {k: v for k, v in node_labels.items() if not k.startswith(BUILTIN_LABEL_PREFIXES)},
+            }
+        )  # fmt: skip
+    groups = assign_nodes(nodes, pools, cluster["prov_name"] if cluster else None)
+    for g in groups:
+        g["os"] = sorted({n["os"] for n in g["nodes"] if n["os"]})
+        known = [n for n in g["nodes"] if n["cpu_m"] is not None and n["mem_b"] is not None]
+        complete = g["nodes"] and len(known) == len(g["nodes"])
+        g["cpu_m"] = sum(n["cpu_m"] for n in known) if complete else None
+        g["mem_b"] = sum(n["mem_b"] for n in known) if complete else None
+    return {"pools_status": cluster["pools_status"] if cluster else None, "groups": groups}
+
+
+def _node_pinned_pv(pv: dict) -> bool:
+    return bool(pv["pinned"]) or pv["source"] in ("local", "hostPath")
+
+
+def cluster_sheet(conn: sqlite3.Connection, rules: Rules, site: str, cluster_id: str) -> dict:
+    """Everything the cluster page shows beyond the cluster row, one entry per page table."""
+    key = (site, cluster_id)
+    floating = floating_ips(conn, rules, site, cluster_id)
+    dbs = databases(conn, rules, site, cluster_id)
+    flags = _watch_out(conn, rules, site, floating, dbs).get(key, [])
+    nodes = node_groups(conn, site, cluster_id)
+    pvs = queries.pvs(conn, site=site, cluster_id=cluster_id)
+    for pv in pvs:
+        pv["node_pinned"] = _node_pinned_pv(pv)
+    pinned_claims = {(pv["claim_namespace"], pv["claim_name"]) for pv in pvs if pv["node_pinned"]}
+    pvcs = queries.pvcs(conn, [], site=site, cluster_id=cluster_id)
+    for pvc in pvcs:
+        pvc["node_pinned"] = (pvc["namespace"], pvc["name"]) in pinned_claims
+    services = [
+        s for s in queries.cluster_services(conn, site, cluster_id)
+        if s["type"] == "NodePort" or (s["type"] != "LoadBalancer" and s["addresses"])
+    ]  # fmt: skip
+    webhooks = queries.webhooks(conn, site=site, cluster_id=cluster_id)
+    for w in webhooks:
+        w["custom"] = _custom_webhook(w, rules)
+    statefulsets = [
+        {"namespace": r["namespace"], "name": r["name"], "replicas": r["replicas"],
+         "volume_claim_templates": json.loads(r["vcts"] or "[]")}
+        for r in conn.execute(
+            """SELECT r.namespace, r.name, json_extract(r.data, '$.spec.replicas') AS replicas,
+                      json_extract(r.data, '$.volume_claim_templates') AS vcts
+               FROM resources r WHERE r.site = ? AND r.cluster_id = ? AND r.kind = 'statefulsets'
+               ORDER BY r.namespace, r.name""",
+            (site, cluster_id),
+        )
+    ]  # fmt: skip
+    stored = conn.execute("SELECT labels FROM clusters WHERE site = ? AND cluster_id = ?", key).fetchone()
+    try:
+        labels = json.loads(stored["labels"] or "{}") if stored else {}
+    except ValueError:  # malformed labels JSON counts as no labels
+        labels = {}
+    groups = nodes["groups"]
+    return {
+        "flags": flags,
+        "floating": floating.get(key),
+        "pools_status": nodes["pools_status"],
+        "groups": groups,
+        "tables": {
+            "nodes": [{**n, "group": g["name"]} for g in groups for n in g["nodes"]],
+            "pools": [{k: v for k, v in g.items() if k != "nodes"} | {"node_count": len(g["nodes"])} for g in groups],
+            "lb_services": lb_services(conn, rules, site, cluster_id),
+            "services": services,
+            "pvs": pvs,
+            "pvcs": pvcs,
+            "databases": [{"engine": h["engine"], "namespace": h.get("namespace"), "kind": h.get("kind"),
+                           "name": h.get("name"), "image": h.get("image"), "crd_group": h.get("crd_group")}
+                          for h in dbs.get(key, [])],
+            "statefulsets": statefulsets,
+            "webhooks": webhooks,
+            "annotations": queries.cluster_annotations(conn, site, cluster_id),
+            "cluster_labels": [{"key": k, "value": v} for k, v in sorted(labels.items())],
+        },
+    }  # fmt: skip

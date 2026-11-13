@@ -1,6 +1,12 @@
 {% extends "base.html" %}
 {% from "_csv.html" import csv_link with context %}
-{% from "_class_badge.html" import class_badge, complexity_badges, flag_badges, state %}
+{% from "_class_badge.html" import class_badge, state %}
+{% macro na(v) %}{{ "not available" if v is none or v == "" else v }}{% endmacro %}
+{% macro _cores(v) %}{{ "not available" if v is none else v | cores }}{% endmacro %}
+{% macro _gib(v) %}{{ "not available" if v is none else v | gib }}{% endmacro %}
+{% macro _list(v) %}{{ v | join(", ") if v else "none" }}{% endmacro %}
+{% macro _labels(m) %}{% for k, v in m.items() %}{{ k }}={{ v }}{% if not loop.last %}, {% endif %}{% else %}none{% endfor %}{% endmacro %}
+{% macro _yes(v) %}{{ "not collected" if v is none else ("yes" if v else "no") }}{% endmacro %}
 {% block title %}{{ c.name }} - Rancher inventory{% endblock %}
 {% block content %}
 <h1>{{ c.name }} <span class="muted">({{ c.site }} / {{ c.cluster_id }})</span></h1>
@@ -12,33 +18,192 @@
   <button type="submit" {% if header.active_run %}disabled{% endif %}>Refresh this cluster</button>
 </form>
 {% endif %}
+
+<h2>Summary</h2>
+<p>{{ class_badge(p.class if p else none) }} {{ state(p, user.role == "admin") if p }}</p>
 <table class="facts">
-  <tr><th>State</th><td>{{ c.state or "-" }}</td></tr>
-  <tr><th>Provider</th><td>{{ c.provider or "-" }}</td></tr>
-  <tr><th>Kubernetes</th><td>{{ c.k8s_version or "-" }}</td></tr>
-  <tr><th>Nodes</th><td>{{ c.node_count if c.node_count is not none else "-" }}</td></tr>
-  <tr><th>CPU cores alloc / req / used</th><td>{{ c.cpu_alloc_m | cores }} / {{ c.cpu_req_m | cores }} / {{ c.cpu_used_m | cores }}</td></tr>
-  <tr><th>Memory GiB alloc / req / used</th><td>{{ c.mem_alloc_b | gib }} / {{ c.mem_req_b | gib }} / {{ c.mem_used_b | gib }}</td></tr>
-  <tr><th>Last ok</th><td>{{ c.last_ok_at | dt }}</td></tr>
-  {% if user.role == "admin" %}<tr><th>Last error</th><td class="error">{{ c.last_error or "" }}</td></tr>{% endif %}
+  <tr><th>State</th><td>{{ na(c.state) }}</td></tr>
+  <tr><th>Provider</th><td>{{ na(c.provider) }}</td></tr>
+  <tr><th>Kubernetes</th><td>{{ na(c.k8s_version) }}</td></tr>
+  <tr><th>Nodes</th><td>{{ na(c.node_count) }}</td></tr>
+  <tr><th>vCPU alloc / req / used</th><td>{{ _cores(c.cpu_alloc_m) }} / {{ _cores(c.cpu_req_m) }} / {{ _cores(c.cpu_used_m) }}</td></tr>
+  <tr><th>Memory GiB alloc / req / used</th><td>{{ _gib(c.mem_alloc_b) }} / {{ _gib(c.mem_req_b) }} / {{ _gib(c.mem_used_b) }}</td></tr>
+  <tr><th>Last ok</th><td>{{ c.last_ok_at | dt if c.last_ok_at else "not available" }}</td></tr>
+  <tr><th>Watch out</th><td>{% for f in flags %}<span class="badge {{ 'complexity' if p and f in p.complexity else 'watch' }}">{{ f }}</span>{% else %}none{% endfor %}</td></tr>
+  {% if user.role == "admin" %}<tr><th>Last error</th><td class="error">{{ c.last_error or "none" }}</td></tr>{% endif %}
 </table>
 
-
-<h2>Profile</h2>
-{% if p and p.class %}
-<p>{{ class_badge(p.class) }} {{ flag_badges(p) }} {{ complexity_badges(p) }} {{ state(p, user.role == "admin") }}</p>
-<table class="facts">
-  <tr><th>StatefulSets (user namespaces)</th><td>{{ p.statefulsets }}</td></tr>
-  <tr><th>Bound PVCs (user namespaces)</th><td>{{ p.pvc_bound }} ({{ p.pvc_bytes | size }})</td></tr>
-  <tr><th>Helm releases (user namespaces)</th><td>{{ p.helm_releases }}</td></tr>
-  <tr><th>LoadBalancer services</th><td>{{ p.lb_services }}</td></tr>
-  <tr><th>Ingresses</th><td>{{ p.ingresses }}</td></tr>
-  <tr><th>CNI and CIDRs</th><td>{{ p.cni }} {{ p.cidrs }}</td></tr>
-  <tr><th>Profile built in run</th><td>{{ p.updated_run }}</td></tr>
+<h2>Nodes</h2>
+<p>{% if pools_status == "ok" %}Grouped by machine pool.{% elif pools_status == "none" %}No machine pools (custom or imported cluster), grouped by role.{% else %}Machine pools not collected, grouped by role.{% endif %}
+   Nodes {{ csv_link("nodes") }}, groups {{ csv_link("pools") }}</p>
+<table>
+  <tr><th>Group</th><th>Nodes</th><th>Roles</th><th>OS</th><th>vCPU</th><th>Memory GiB</th><th>Pool labels</th><th>Taints</th><th>Machine config kind</th></tr>
+  {% for g in groups %}
+  <tr><td>{{ g.name }} <span class="muted">({{ g.kind }})</span></td>
+      <td class="r">{{ g.nodes | length }}{% if g.kind == "pool" %} of {{ na(g.quantity) }}{% endif %}</td>
+      <td>{{ _list(g.roles) }}</td><td>{{ g.os | join(", ") if g.os else "not available" }}</td>
+      <td class="r">{{ _cores(g.cpu_m) }}</td><td class="r">{{ _gib(g.mem_b) }}</td>
+      <td>{{ _labels(g.labels) if g.kind == "pool" else "not available" }}</td><td>{{ _list(g.taints) }}</td>
+      <td>{{ na(g.machine_config_kind) }}</td></tr>
+  {% if g.nodes %}
+  <tr><td colspan="9">
+    <details><summary>Show nodes</summary>
+    <table>
+      <tr><th>Name</th><th>Internal IP</th><th>OS</th><th>Kernel</th><th>Runtime</th><th>Arch</th><th>Ready</th><th>vCPU</th><th>Memory GiB</th><th>Labels</th></tr>
+      {% for n in g.nodes %}
+      <tr><td>{{ n.name }}</td><td>{{ na(n.internal_ip) }}</td><td>{{ na(n.os) }}</td><td>{{ na(n.kernel) }}</td><td>{{ na(n.runtime) }}</td>
+          <td>{{ na(n.arch) }}</td><td>{{ na(n.ready) }}</td><td class="r">{{ _cores(n.cpu_m) }}</td><td class="r">{{ _gib(n.mem_b) }}</td>
+          <td>{{ _labels(n.labels_other) }}
+            <details><summary>{{ n.labels_builtin | length }} built-in labels</summary>{{ _labels(n.labels_builtin) }}</details></td></tr>
+      {% endfor %}
+    </table>
+    </details>
+  </td></tr>
+  {% endif %}
+  {% else %}
+  <tr><td colspan="9">No nodes collected.</td></tr>
+  {% endfor %}
 </table>
-{% else %}
-<p>No profile yet. {{ state(p, user.role == "admin") if p }}</p>
-{% endif %}
+
+<h2>External networking</h2>
+<p>IPs that NSX assigns outside Kubernetes are not visible to this app.</p>
+<table class="facts">
+  {% if floating %}
+  <tr><th>Floating IP needs</th><td>{{ floating.total }}</td></tr>
+  <tr><th>By source</th><td>load balancer {{ floating.lb }}, external IP {{ floating.external_ip }}, ingress LB {{ floating.ingress_lb }},
+      node external {{ floating.node_external }}, control plane {{ 1 if floating.control_plane else 0 }}</td></tr>
+  <tr><th>Addresses</th><td>{{ _list(floating.addresses) }}</td></tr>
+  <tr><th>Special network config</th><td>{{ _list(floating.special) }}</td></tr>
+  {% else %}
+  <tr><th>Floating IP needs</th><td>not available</td></tr>
+  {% endif %}
+  <tr><th>Control plane endpoint</th><td>{{ floating.control_plane if floating and floating.control_plane else "not available" }}</td></tr>
+  <tr><th>CNI</th><td>{{ p.cni if p and p.cni else "not available" }}</td></tr>
+  <tr><th>CIDRs</th><td>{{ p.cidrs if p else "not available" }}</td></tr>
+</table>
+
+<h3>LoadBalancer services</h3>
+<p>{{ csv_link("lb_services") }}</p>
+<table>
+  <tr><th>Namespace</th><th>Name</th><th>Addresses</th><th>Implementation</th><th>Signals</th></tr>
+  {% for s in lb_services %}
+  <tr><td>{{ s.namespace }}</td><td>{{ s.name }}</td><td>{{ s.addresses | join(", ") if s.addresses else "not assigned" }}</td>
+      <td>{{ s.implementation }}</td><td>{{ _list(s.signals) }}</td></tr>
+  {% else %}
+  <tr><td colspan="5">None.</td></tr>
+  {% endfor %}
+</table>
+
+<h3>Ingresses</h3>
+<p>{{ csv_link("ingresses") }}</p>
+<table>
+  <tr><th>Namespace</th><th>Name</th><th>Hosts</th><th>Load balancer</th></tr>
+  {% for i in ingresses %}
+  <tr><td>{{ i.namespace }}</td><td>{{ i.name }}</td><td>{{ i.hosts or "none" }}</td><td>{{ i.lbs or "none" }}</td></tr>
+  {% else %}
+  <tr><td colspan="4">None.</td></tr>
+  {% endfor %}
+</table>
+
+<h3>NodePort and external IP services</h3>
+<p>{{ csv_link("services") }}</p>
+<table>
+  <tr><th>Namespace</th><th>Name</th><th>Type</th><th>External addresses</th></tr>
+  {% for s in services %}
+  <tr><td>{{ s.namespace }}</td><td>{{ s.name }}</td><td>{{ na(s.type) }}</td><td>{{ s.addresses or "none" }}</td></tr>
+  {% else %}
+  <tr><td colspan="4">None.</td></tr>
+  {% endfor %}
+</table>
+
+<h2>Storage</h2>
+<h3>Persistent volumes</h3>
+<p>{{ csv_link("pvs") }}</p>
+<table>
+  <tr><th>Name</th><th>Capacity</th><th>Storage class</th><th>Source</th><th>Node-pinned</th><th>Reclaim</th><th>Phase</th><th>Claim</th></tr>
+  {% for v in pvs %}
+  <tr><td>{{ v.name }}</td><td>{{ na(v.capacity) }}</td><td>{{ v.storage_class or "none" }}</td><td>{{ na(v.source) }}</td>
+      <td>{% if v.node_pinned %}<span class="badge watch">node-pinned</span>{% else %}no{% endif %}</td>
+      <td>{{ na(v.reclaim) }}</td><td>{{ na(v.phase) }}</td>
+      <td>{{ v.claim_namespace ~ "/" ~ v.claim_name if v.claim_name else "none" }}</td></tr>
+  {% else %}
+  <tr><td colspan="8">None.</td></tr>
+  {% endfor %}
+</table>
+
+<h3>Persistent volume claims</h3>
+<p>{{ csv_link("pvcs") }}</p>
+<table>
+  <tr><th>Namespace</th><th>Name</th><th>Storage class</th><th>Access modes</th><th>Requested</th><th>Capacity</th><th>Phase</th>
+      <th>Source</th><th>Node-pinned</th><th>Mounted</th><th>Used by</th></tr>
+  {% for v in pvcs %}
+  <tr><td>{{ v.namespace }}</td><td>{{ v.name }}</td><td>{{ v.storage_class or "none" }}</td><td>{{ na(v.access_modes) }}</td>
+      <td>{{ na(v.requested) }}</td><td>{{ na(v.capacity) }}</td><td>{{ na(v.phase) }}</td><td>{{ na(v.source) }}</td>
+      <td>{% if v.node_pinned %}<span class="badge watch">node-pinned</span>{% else %}no{% endif %}</td>
+      <td>{{ _yes(v.mounted) }}</td><td>{{ v.used_by or "none" }}</td></tr>
+  {% else %}
+  <tr><td colspan="11">None.</td></tr>
+  {% endfor %}
+</table>
+
+<h2>Databases and stateful workloads</h2>
+<p>{{ csv_link("databases") }}</p>
+<table>
+  <tr><th>Engine</th><th>Namespace</th><th>Kind</th><th>Name</th><th>Found by</th></tr>
+  {% for d in databases %}
+  <tr><td>{{ d.engine }}</td><td>{{ d.namespace or "cluster" }}</td><td>{{ d.kind or "operator CRD" }}</td><td>{{ d.name or d.crd_group }}</td>
+      <td>{{ "image " ~ d.image if d.image else "CRD group " ~ d.crd_group }}</td></tr>
+  {% else %}
+  <tr><td colspan="5">None found.</td></tr>
+  {% endfor %}
+</table>
+
+<h3>StatefulSets</h3>
+<p>{{ csv_link("statefulsets") }}</p>
+<table>
+  <tr><th>Namespace</th><th>Name</th><th>Replicas</th><th>Volume claim templates</th></tr>
+  {% for s in statefulsets %}
+  <tr><td>{{ s.namespace }}</td><td>{{ s.name }}</td><td class="r">{{ na(s.replicas) }}</td>
+      <td>{% for t in s.volume_claim_templates %}{{ t.name }} ({{ t.storage_class or "default class" }}, {{ t.size or "size not set" }}){% if not loop.last %}, {% endif %}{% else %}none{% endfor %}</td></tr>
+  {% else %}
+  <tr><td colspan="4">None.</td></tr>
+  {% endfor %}
+</table>
+
+<h2>Platform dependencies</h2>
+<h3>Helm releases</h3>
+<p>{{ csv_link("helm") }}</p>
+<table>
+  <tr><th>Namespace</th><th>Release</th><th>Chart</th><th>Version</th><th>Status</th></tr>
+  {% for h in helm %}
+  <tr><td>{{ h.namespace }}</td><td>{{ h.name }}</td><td>{{ na(h.chart) }}</td><td>{{ na(h.version) }}</td><td>{{ na(h.status) }}</td></tr>
+  {% else %}
+  <tr><td colspan="5">None.</td></tr>
+  {% endfor %}
+</table>
+
+<h3>Custom CRD groups</h3>
+<p>{{ csv_link("crd_groups") }}</p>
+<table>
+  <tr><th>Group</th><th>CRDs</th></tr>
+  {% for g in crd_groups %}
+  <tr><td>{{ g.group }}</td><td class="r">{{ g.crds }}</td></tr>
+  {% else %}
+  <tr><td colspan="2">None.</td></tr>
+  {% endfor %}
+</table>
+
+<h3>Admission webhooks</h3>
+<p>{{ csv_link("webhooks") }}</p>
+<table>
+  <tr><th>Type</th><th>Name</th><th>Webhooks</th><th>Failure policies</th><th>Service namespaces</th><th>URL based</th><th>Custom</th></tr>
+  {% for w in webhooks %}
+  <tr><td>{{ w.type }}</td><td>{{ w.name }}</td><td class="r">{{ na(w.webhooks) }}</td><td>{{ _list(w.failure_policies | select | list) }}</td>
+      <td>{{ _list(w.service_namespaces) }}</td><td>{{ _yes(w.url_based) }}</td><td>{{ "yes" if w.custom else "no" }}</td></tr>
+  {% else %}
+  <tr><td colspan="7">None.</td></tr>
+  {% endfor %}
+</table>
 
 <h2>Namespaces</h2>
 <p>{{ csv_link("namespaces") }}</p>
@@ -54,51 +219,19 @@
   {% endfor %}
 </table>
 
-<h2>Services</h2>
-<p>{{ csv_link("services") }}</p>
+<h2>Custom annotations</h2>
+<p>{{ csv_link("annotations") }}</p>
 <table>
-  <tr><th>Namespace</th><th>Name</th><th>Type</th><th>Addresses</th></tr>
-  {% for s in services %}
-  <tr><td>{{ s.namespace }}</td><td>{{ s.name }}</td><td>{{ s.type or "" }}</td><td>{{ s.addresses or "" }}</td></tr>
-  {% else %}
-  <tr><td colspan="4">None.</td></tr>
-  {% endfor %}
-</table>
-
-<h2>Ingresses</h2>
-<p>{{ csv_link("ingresses") }}</p>
-<table>
-  <tr><th>Namespace</th><th>Name</th><th>Hosts</th><th>Load balancer</th></tr>
-  {% for i in ingresses %}
-  <tr><td>{{ i.namespace }}</td><td>{{ i.name }}</td><td>{{ i.hosts or "" }}</td><td>{{ i.lbs or "" }}</td></tr>
-  {% else %}
-  <tr><td colspan="4">None.</td></tr>
-  {% endfor %}
-</table>
-
-<h2>Helm releases</h2>
-<p>{{ csv_link("helm") }}</p>
-<table>
-  <tr><th>Namespace</th><th>Release</th><th>Chart</th><th>Version</th><th>Status</th></tr>
-  {% for h in helm %}
-  <tr><td>{{ h.namespace }}</td><td>{{ h.name }}</td><td>{{ h.chart }}</td><td>{{ h.version }}</td><td>{{ h.status or "" }}</td></tr>
+  <tr><th>Kind</th><th>Namespace</th><th>Name</th><th>Key</th><th>Value</th></tr>
+  {% for a in annotations %}
+  <tr><td>{{ a.kind }}</td><td>{{ a.namespace or "cluster" }}</td><td>{{ a.name }}</td><td>{{ a.key }}</td><td>{{ a.value }}</td></tr>
   {% else %}
   <tr><td colspan="5">None.</td></tr>
   {% endfor %}
 </table>
 
-<h2>Custom CRD groups</h2>
-<p>{{ csv_link("crd_groups") }}</p>
-<table>
-  <tr><th>Group</th><th>CRDs</th></tr>
-  {% for g in crd_groups %}
-  <tr><td>{{ g.group }}</td><td class="r">{{ g.crds }}</td></tr>
-  {% else %}
-  <tr><td colspan="2">None.</td></tr>
-  {% endfor %}
-</table>
-
 <h2>Usage per day</h2>
+<p>{{ csv_link("metrics") }}</p>
 {% if metrics %}
 <div class="charts">
   <div class="chart"><canvas id="cpu-chart"></canvas></div>
@@ -106,10 +239,14 @@
 </div>
 <script type="application/json" id="metrics-data">{{ metrics | tojson }}</script>
 <script src="/static/chart.umd.min.js"></script>
+<script src="/static/overview.js"></script>
 <script>
 (function () {
+  // Same palette as the overview charts (VizPalette from overview.js).
+  var P = window.VizPalette;
   var rows = JSON.parse(document.getElementById("metrics-data").textContent);
   var days = rows.map(function (r) { return r.day; });
+  Chart.defaults.color = P.text;
   function series(key, div) {
     return rows.map(function (r) { return r[key] === null ? null : r[key] / div; });
   }
@@ -118,21 +255,30 @@
       type: "line",
       data: {
         labels: days,
-        datasets: [
-          { label: "Allocatable", data: series(keys[0], div), borderColor: "#4a6fa5" },
-          { label: "Requested", data: series(keys[1], div), borderColor: "#c97b2a" },
-          { label: "Used", data: series(keys[2], div), borderColor: "#3d8b5a" }
-        ]
+        datasets: ["Allocatable", "Requested", "Used"].map(function (label, i) {
+          return { label: label, data: series(keys[i], div), borderColor: P.series[i], backgroundColor: P.series[i] };
+        })
       },
-      options: { animation: false, plugins: { title: { display: true, text: title } },
-                 scales: { y: { beginAtZero: true } } }
+      options: { animation: false, plugins: { title: { display: true, text: title, color: P.text } },
+                 scales: { x: { grid: { display: false } }, y: { beginAtZero: true, grid: { color: P.grid } } } }
     });
   }
-  draw("cpu-chart", "CPU cores", ["cpu_alloc_m", "cpu_req_m", "cpu_used_m"], 1000);
+  draw("cpu-chart", "vCPU", ["cpu_alloc_m", "cpu_req_m", "cpu_used_m"], 1000);
   draw("mem-chart", "Memory GiB", ["mem_alloc_b", "mem_req_b", "mem_used_b"], 1073741824);
 })();
 </script>
 {% else %}
 <p>No metrics yet.</p>
 {% endif %}
+
+<h2>Cluster labels</h2>
+<p>{{ csv_link("cluster_labels") }}</p>
+<table>
+  <tr><th>Key</th><th>Value</th></tr>
+  {% for l in cluster_labels %}
+  <tr><td>{{ l.key }}</td><td>{{ l.value }}</td></tr>
+  {% else %}
+  <tr><td colspan="2">None.</td></tr>
+  {% endfor %}
+</table>
 {% endblock %}

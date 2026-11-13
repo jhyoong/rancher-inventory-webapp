@@ -46,16 +46,24 @@ def cluster(
         raise HTTPException(404, "cluster not found")
     metrics = queries.cluster_metrics(conn, site, cluster_id)
     rules = load_rules(get_settings(request))
+    sheet = migration.cluster_sheet(conn, rules, site, cluster_id)
+    # CSV and page tables in page order
     tables = {
-        "namespaces": queries.namespace_profiles(conn, site, cluster_id),
-        "services": queries.cluster_services(conn, site, cluster_id),
+        **{k: sheet["tables"][k] for k in ("nodes", "pools", "lb_services", "services")},
         "ingresses": queries.cluster_ingresses(conn, site, cluster_id),
+        **{k: sheet["tables"][k] for k in ("pvs", "pvcs", "databases", "statefulsets")},
         "helm": queries.cluster_helm(conn, site, cluster_id),
         "crd_groups": queries.cluster_crd_groups(conn, site, cluster_id, rules),
+        "webhooks": sheet["tables"]["webhooks"],
+        "namespaces": queries.namespace_profiles(conn, site, cluster_id),
+        "annotations": sheet["tables"]["annotations"],
         "metrics": metrics,
+        "cluster_labels": sheet["tables"]["cluster_labels"],
     }
     if wants_csv(request):
         return csv_download(request, user, f"cluster-{site}-{cluster_id}", tables)
     return render(
-        request, conn, user, "cluster.html", c=row, p=queries.cluster_inventory(conn, site, cluster_id), **tables
-    )
+        request, conn, user, "cluster.html", c=row, p=queries.cluster_inventory(conn, site, cluster_id),
+        flags=sheet["flags"], floating=sheet["floating"], pools_status=sheet["pools_status"], groups=sheet["groups"],
+        **tables,
+    )  # fmt: skip

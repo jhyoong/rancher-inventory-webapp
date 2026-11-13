@@ -2,11 +2,14 @@ import csv
 import io
 import json
 import shutil
+from dataclasses import asdict
+from pathlib import Path
 
 import pytest
 
+from inventory.collector.provisioning import parse_provisioning
 from inventory.collector.rules import load_rules
-from inventory.web.migration import floating_ips, site_overview, watch_out
+from inventory.web.migration import assign_nodes, floating_ips, node_groups, site_overview, watch_out
 
 pytestmark = pytest.mark.live
 
@@ -132,3 +135,52 @@ def test_home_page(admin_client_collected):
     assert other.status_code == 200
     assert "No clusters match." in other.text
     assert CARD in admin_client_collected.get("/?view=cards").text
+
+
+def test_node_groups_dev(collected_db, open_db, dev_lists):
+    conn = open_db(collected_db.db_path, readonly=True)
+    stored = conn.execute("SELECT pools_status FROM clusters WHERE site='dev' AND cluster_id='local'").fetchone()[0]
+    result = node_groups(conn, "dev", "local")
+    # not_collected while the provisioning GlobalRole is not applied on dev, none once it is
+    assert result["pools_status"] == stored and stored in ("not_collected", "none")
+    assert result["groups"] and all(g["kind"] == "role" for g in result["groups"])
+    rows = [n for g in result["groups"] for n in g["nodes"]]
+    nodes = {n["name"]: n for n in rows}
+    assert len(rows) == len(nodes) and set(nodes) == {n["metadata"]["name"] for n in dev_lists["nodes"]}
+    for live in dev_lists["nodes"]:
+        row = nodes[live["metadata"]["name"]]
+        assert row["os"] == live["status"]["nodeInfo"]["osImage"]
+        assert "kubernetes.io/hostname" in row["labels_builtin"]
+        assert "kubernetes.io/hostname" not in row["labels_other"]
+
+
+@pytest.mark.real_fixtures
+def test_assign_nodes_real(real_fixture):
+    prov = real_fixture("provisioning-clusters.json")["items"]
+    items = real_fixture("nodes.json")
+    items = items.get("items", items) if isinstance(items, dict) else items
+    name_file = Path(__file__).parent / "fixtures/real/nodes-cluster.txt"
+    if not name_file.exists():
+        pytest.skip("P2 fixtures missing: nodes-cluster.txt")
+    cluster_name = name_file.read_text().strip()
+    item = next(i for i in prov if (i.get("status") or {}).get("clusterName") == cluster_name)
+    _, p = parse_provisioning(item)
+    pools = [asdict(m) for m in p.pools]
+    nodes = [{"name": n["metadata"]["name"], "roles": []} for n in items]
+    groups = assign_nodes(nodes, pools, p.prov_name)
+    assert all(g["kind"] == "pool" for g in groups if g["nodes"])
+    for g in groups:
+        assert len(g["nodes"]) == g["quantity"], g["name"]
+
+
+def test_cluster_page_sections(admin_client_collected):
+    get = admin_client_collected.get
+    text = get("/clusters/dev/local").text
+    headings = ("Nodes", "External networking", "Storage", "Databases", "Platform dependencies",
+                "Namespaces", "Custom annotations", "Usage per day", "Cluster labels")  # fmt: skip
+    at = [text.index(f"<h2>{h}") for h in headings]
+    assert at == sorted(at)
+    assert "kagent-postgresql" in text and "not visible to this app" in text
+    nodes = get("/clusters/dev/local?format=csv&table=nodes")
+    assert nodes.status_code == 200
+    assert next(csv.reader(io.StringIO(nodes.text)))[0] == "name"
