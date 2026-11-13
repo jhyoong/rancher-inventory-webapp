@@ -1,7 +1,12 @@
+import json
+
 import pytest
 
 from inventory.collector.cluster import collect_cluster
 from inventory.collector.kinds import KindSpec
+from inventory.collector.network import detect_cni
+from inventory.collector.provisioning import ProvisioningResult, read_provisioning
+from inventory.collector.rules import load_rules
 
 pytestmark = pytest.mark.live
 
@@ -117,3 +122,59 @@ def test_inactive_cluster_fails_without_listing(db, live_loop, live_client, loca
     assert r.status == "failed"
     assert r.error == "cluster state: unavailable"
     assert count(db, "SELECT count(*) FROM run_kinds") == 0
+
+
+def _local_row(settings, open_db, sql):
+    conn = open_db(settings.db_path, readonly=True)
+    return conn.execute(sql).fetchall()
+
+
+def test_network_profile_dev(collected_db, dev_lists, open_db):
+    rows = _local_row(collected_db, open_db, "SELECT network FROM cluster_profile WHERE cluster_id='local'")
+    net = json.loads(rows[0][0])
+    assert net["cni"] == "calico"
+    assert net["cni_source"] == "daemonset"
+    assert net["pod_cidrs"] == sorted({n["spec"]["podCIDR"] for n in dev_lists["nodes"]})
+    assert net["service_cidr"] is None
+
+
+def test_pools_status_dev(collected_db, live_loop, live_client, open_db):
+    result = live_loop.run_until_complete(read_provisioning(live_client))
+    assert result.status in ("ok", "forbidden")
+    rows = _local_row(collected_db, open_db, "SELECT pools_status FROM clusters WHERE cluster_id='local'")
+    assert rows[0][0] == ("not_collected" if result.status == "forbidden" else "none")
+    assert not _local_row(collected_db, open_db, "SELECT 1 FROM machine_pools WHERE cluster_id='local'")
+
+
+def test_node_os_stored(collected_db, dev_lists, open_db):
+    keys = ("osImage", "kernelVersion", "containerRuntimeVersion", "architecture")
+    for node in dev_lists["nodes"]:
+        conn = open_db(collected_db.db_path, readonly=True)
+        row = conn.execute(
+            "SELECT json_extract(data, '$.status.nodeInfo') FROM resources"
+            " WHERE cluster_id='local' AND kind='nodes' AND name=?",
+            (node["metadata"]["name"],),
+        ).fetchone()
+        stored = json.loads(row[0])
+        for k in keys:
+            assert stored[k] == node["status"]["nodeInfo"][k]
+
+
+def test_forbidden_provisioning_keeps_run_ok(db, live_loop, live_client, local_cluster, kinds, settings):
+    rules = load_rules(settings)
+    result = live_loop.run_until_complete(
+        collect_cluster(
+            live_client, db, "dev", local_cluster, 1, kinds, rules, noop, never,
+            provisioning=ProvisioningResult("forbidden", {}, "HTTP 403"),
+        )
+    )  # fmt: skip
+    assert result.status == "ok"
+    assert db.execute("SELECT pools_status FROM clusters WHERE cluster_id='local'").fetchone()[0] == "not_collected"
+    net = json.loads(db.execute("SELECT network FROM cluster_profile WHERE cluster_id='local'").fetchone()[0])
+    assert net["cni"] == "calico"
+
+
+def test_detect_cni(settings):
+    rules = load_rules(settings)
+    assert detect_cni(["calico-node", "x"], rules) == "calico"
+    assert detect_cni([], rules) is None

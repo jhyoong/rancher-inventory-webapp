@@ -197,6 +197,12 @@ def test_bad_ca_file_site_does_not_stop_other_sites(settings, db, db_path, tmp_p
     assert "dev-badca" in run["error"]
 
 
+def _copy_local_as_gone(conn, table):
+    cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})")]
+    select = ", ".join("'c-gone'" if c == "cluster_id" else c for c in cols)
+    conn.execute(f"INSERT INTO {table} ({', '.join(cols)}) SELECT {select} FROM {table} WHERE cluster_id='local'")
+
+
 @pytest.mark.live
 def test_full_run_removes_clusters_gone_from_rancher(collected_db, tmp_path, open_db):
     """Rows of a cluster that Rancher no longer lists are removed by a full run.
@@ -210,10 +216,7 @@ def test_full_run_removes_clusters_gone_from_rancher(collected_db, tmp_path, ope
     s = collected_db.model_copy(update={"data_dir": tmp_path})
     conn = open_db(s.db_path)
     conn.execute("BEGIN")
-    conn.execute(
-        "INSERT INTO clusters SELECT site, 'c-gone', name, state, provider, k8s_version, labels, node_count, "
-        "last_ok_run, last_ok_at, last_error, last_seen_run FROM clusters WHERE cluster_id='local'"
-    )
+    _copy_local_as_gone(conn, "clusters")
     conn.execute(
         "INSERT INTO resources (site, cluster_id, kind, namespace, name, data, hash, created_at, last_seen_run) "
         "SELECT site, 'c-gone', kind, namespace, name, data, hash, created_at, last_seen_run "
@@ -226,9 +229,11 @@ def test_full_run_removes_clusters_gone_from_rancher(collected_db, tmp_path, ope
         "AND g.namespace=r.namespace AND g.name=r.name WHERE r.cluster_id='local'"
     )
     for table in ("namespace_profile", "cluster_profile", "cluster_metrics_latest", "cluster_metrics", "run_clusters"):
-        cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})")]
-        select = ", ".join("'c-gone'" if c == "cluster_id" else c for c in cols)
-        conn.execute(f"INSERT INTO {table} ({', '.join(cols)}) SELECT {select} FROM {table} WHERE cluster_id='local'")
+        _copy_local_as_gone(conn, table)
+    conn.execute(
+        "INSERT INTO machine_pools (site, cluster_id, name) SELECT site, 'c-gone', 'pool-a' FROM clusters"
+        " WHERE cluster_id='local'"
+    )
     conn.execute("COMMIT")
     assert conn.execute("SELECT count(*) FROM resource_labels l JOIN resources r ON r.id=l.resource_id "
                         "WHERE r.cluster_id='c-gone'").fetchone()[0] > 0
@@ -242,6 +247,7 @@ def test_full_run_removes_clusters_gone_from_rancher(collected_db, tmp_path, ope
     for table in ("clusters", "resources", "namespace_profile", "cluster_profile", "cluster_metrics_latest"):
         assert count(table, "c-gone") == 0, table
         assert count(table, "local") > 0, table
+    assert count("machine_pools", "c-gone") == 0
     assert conn.execute("SELECT count(*) FROM resource_labels l LEFT JOIN resources r ON r.id=l.resource_id "
                         "WHERE r.id IS NULL").fetchone()[0] == 0
     assert count("cluster_metrics", "c-gone") > 0
@@ -255,10 +261,7 @@ def test_scoped_run_keeps_unlisted_clusters(collected_db, tmp_path, open_db):
     shutil.copy(collected_db.db_path, tmp_path / "inventory.db")
     s = collected_db.model_copy(update={"data_dir": tmp_path})
     conn = open_db(s.db_path)
-    conn.execute(
-        "INSERT INTO clusters SELECT site, 'c-gone', name, state, provider, k8s_version, labels, node_count, "
-        "last_ok_run, last_ok_at, last_error, last_seen_run FROM clusters WHERE cluster_id='local'"
-    )
+    _copy_local_as_gone(conn, "clusters")
     rid = create_run(conn, "manual", "t", Scope(site="dev", cluster_id="local"))
     assert asyncio.run(execute_run(s, rid)) == "ok"
     assert conn.execute("SELECT count(*) FROM clusters WHERE cluster_id='c-gone'").fetchone()[0] == 1

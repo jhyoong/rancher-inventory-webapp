@@ -6,8 +6,10 @@ from datetime import datetime, timezone
 
 from inventory.collector.classify import build_profiles
 from inventory.collector.kinds import KindSpec
+from inventory.collector.network import cluster_network
 from inventory.collector.optional import run_optional
 from inventory.collector.platform import collect_api_versions
+from inventory.collector.provisioning import ProvisioningResult, pools_status
 from inventory.collector.rules import Rules
 from inventory.collector.transform import ClusterContext, Trimmed, skip_object, trim
 from inventory.collector.units import metrics_from_cluster, parse_bytes, parse_cpu
@@ -19,6 +21,7 @@ from inventory.db.repo import (
     upsert_cluster,
     upsert_resources,
     write_metrics,
+    write_pools,
     write_api_versions,
     write_run_kind,
 )
@@ -77,6 +80,7 @@ async def collect_cluster(
     should_stop: Callable[[], bool],
     *,
     retention_days: int = 365,
+    provisioning: ProvisioningResult | None = None,
 ) -> ClusterResult:
     """Collect every kind for one cluster.
 
@@ -135,6 +139,12 @@ async def collect_cluster(
         done += 1
         on_progress(done, total)
 
+    prov = provisioning.clusters.get(cid) if provisioning else None
+    write_pools(
+        conn, site, cid, pools_status(provisioning, cid),
+        prov.prov_name if prov else None, prov.pools if prov else [],
+    )  # fmt: skip
+
     try:  # metrics problems never fail a collected cluster
         try:
             usage = await client.list_kind(cid, NODE_USAGE_PATH)
@@ -169,7 +179,10 @@ async def collect_cluster(
         write_api_versions(conn, site, cid, served, in_use)
     if rules is not None and not stopped and not failed_kinds:
         try:
-            build_profiles(conn, site, cid, run_id, rules, pod_usage=pod_usage)
+            build_profiles(
+                conn, site, cid, run_id, rules, pod_usage=pod_usage,
+                network=cluster_network(conn, site, cid, prov, rules),
+            )  # fmt: skip
         except Exception as e:  # collected data stays; the cluster is marked failed
             logger.exception("profile build failed for %s/%s", site, cid)
             error = f"profile build failed: {e}"

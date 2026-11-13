@@ -349,6 +349,9 @@ def _decode_profile(d: dict) -> dict:
     d["crd_group_count"] = len(groups)
     d["cni"] = net.get("cni") or ""
     d["cidrs"] = ", ".join(v for v in (net.get("cluster_cidr"), net.get("service_cidr")) if v)
+    if not d["cidrs"]:
+        pods = net.get("pod_cidrs") or []
+        d["cidrs"] = "pod ranges from nodes: " + ", ".join(pods) if pods else "not available"
     d["failed"] = d.get("latest_status") == "failed"
     return d
 

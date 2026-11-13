@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 
 from inventory.collector.cluster import collect_cluster
 from inventory.collector.kinds import KindSpec, load_kinds
+from inventory.collector.provisioning import ProvisioningResult, read_provisioning
 from inventory.collector.rules import Rules, load_rules
 from inventory.db.connection import connect
 from inventory.db.repo import mark_cluster_failed, transaction
@@ -254,6 +255,7 @@ async def _execute(settings: Settings, conn: sqlite3.Connection, run_id: int, sh
             )
             conn.execute("UPDATE runs SET clusters_total=? WHERE id=?", (len(work), run_id))
 
+        provisioning = {name: await read_provisioning(c) for name, (c, _) in clients.items()}
         sems = {name: asyncio.Semaphore(settings.concurrency_per_site) for name in clients}
 
         async def one(site: Site, cluster: dict) -> str:
@@ -261,7 +263,7 @@ async def _execute(settings: Settings, conn: sqlite3.Connection, run_id: int, sh
                 client, token = clients[site.name]
                 return await _run_cluster(
                     conn, run_id, site.name, cluster, client, token, kinds, rules, settings,
-                    cancelled, should_stop,
+                    cancelled, should_stop, provisioning[site.name],
                 )  # fmt: skip
 
         statuses = await asyncio.gather(*(one(s, c) for s, c in work))
@@ -281,7 +283,7 @@ def _remove_unlisted(conn: sqlite3.Connection, site: str, listed: set[str]) -> N
         with transaction(conn):
             for table in (
                 "resources", "namespace_profile", "cluster_profile", "cluster_metrics_latest", "clusters",
-                "api_versions", "optional_results",
+                "api_versions", "optional_results", "machine_pools",
             ):
                 conn.execute(f"DELETE FROM {table} WHERE site=? AND cluster_id=?", (site, cid))
         log.info("removed cluster %s/%s: Rancher no longer lists it", site, cid)
@@ -299,6 +301,7 @@ async def _run_cluster(
     settings: Settings,
     cancelled: Callable[[], bool],
     should_stop: Callable[[], bool],
+    provisioning: ProvisioningResult | None = None,
 ) -> str:
     cid = cluster["id"]
     key = (run_id, site, cid)
@@ -321,7 +324,7 @@ async def _run_cluster(
     try:
         r = await collect_cluster(
             client, conn, site, cluster, run_id, kinds, rules, on_progress, should_stop,
-            retention_days=settings.metrics_retention_days,
+            retention_days=settings.metrics_retention_days, provisioning=provisioning,
         )  # fmt: skip
         status, total, done, objects, error = r.status, r.kinds_total, r.kinds_done, r.objects, r.error
     except Exception as e:
