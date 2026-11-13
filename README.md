@@ -156,7 +156,7 @@ The machine pools (with their labels), the CNI and the cluster CIDRs (plan secti
 - the CNI is guessed from the cluster's DaemonSets (see `cni_daemonsets` in [Rules for networking and databases](#rules-for-networking-and-databases));
 - pod ranges come from the node `podCIDR` values.
 
-Imported clusters do not have provisioning data, so pools stay "not collected" there even with this step.
+With this step, custom and imported clusters (which have no machine pools) show pools as "none". Without it, every cluster shows "not collected".
 
 ```yaml
 apiVersion: management.cattle.io/v3
@@ -407,7 +407,7 @@ The pages are built for planning a move from VMware and NSX to Nutanix NKP.
 - **Clusters (`/clusters`)**: the same Table and Cards views, with filters for flags and for labels (cluster, node and machine pool labels).
 - **Cluster page (`/clusters/<site>/<cluster>`)**: a migration sheet with nodes grouped by machine pool, CNI, CIDRs, databases found, and the Watch out flags for that cluster.
 - **Watch out flags** mark things that need a decision before a move, for example `node-pinned-pv`, `database`, `external-ip`, `nodeport`, `host-network`, `k8s<1.32` and `privileged/hostpath`.
-- **Floating IPs**: the count of LoadBalancer and external IPs that Kubernetes reports on Services. IPs that NSX assigns outside Kubernetes (for example SNAT or manual NAT rules) are not visible to the app and are not in this count.
+- **Floating IPs**: the number of distinct addresses a cluster needs to keep. It counts LoadBalancer Service addresses (status ingress and a pinned `spec.loadBalancerIP`), Service `spec.externalIPs`, ingress controller LB addresses (an address already counted as a LoadBalancer address counts once) and node ExternalIP addresses, plus 1 for the control plane endpoint when Rancher shows one. The `external-ip` Watch out flag shows when any of those addresses exist; the control plane endpoint alone does not set it. The "External IP" column on the cluster page is only the `spec.externalIPs` source, so `external-ip` can show while that column is 0 (for example when the only address is an ingress LB address). IPs that NSX assigns outside Kubernetes (for example SNAT or manual NAT rules) are not visible to the app and are not in this count.
 - **Old URLs** `/inventory`, `/helm`, `/crds`, `/annotations` and `/namespaces` redirect (307) to the new pages and keep the query string, so saved links still work.
 
 `tests/fixtures/real/` holds fixtures from real clusters. It is git-ignored and exists only on the dev Mac. Tests that need it are skipped when it is missing ("P2 fixtures missing").
@@ -434,7 +434,7 @@ The built-in rules are in [config/defaults/rules.yaml](config/defaults/rules.yam
 | `exclude` | Image patterns to ignore, for example `*exporter*` |
 | `operator_crd_groups` | Engine name to the CRD API groups of its operators |
 
-To extend a list, copy `config/defaults/rules.yaml` to `config/rules.yaml` and edit it. An override file that sets `network` or `databases` replaces that whole section. Any sub-key you leave out becomes empty, so copy the full section and then change it. If the override file does not set a section, the built-in defaults are used for it.
+To extend a list, copy `config/defaults/rules.yaml` to `config/rules.yaml` and edit it. An override file that sets `network` or `databases` replaces that whole section. Any sub-key you leave out becomes empty, so copy the full section and then change it. If the override file does not set a section, the built-in defaults are used for it. Unknown keys inside `network` or `databases` are rejected with a config error.
 
 ## Known behaviour
 
