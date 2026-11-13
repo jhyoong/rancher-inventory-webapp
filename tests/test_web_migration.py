@@ -199,3 +199,35 @@ def test_cluster_csv_tables(admin_client_collected, dev_lists):
     bare = get("/clusters/dev/local?format=csv").text.splitlines()[0]
     assert bare == get("/clusters/dev/local?format=csv&table=namespaces").text.splitlines()[0]
     assert "namespace" in bare.split(",")
+
+
+@pytest.mark.parametrize(
+    "old, new",
+    [
+        ("/helm?chart=cert-manager", "/platform?chart=cert-manager"),
+        ("/crds?custom_only=1", "/platform?custom_only=1"),
+        ("/annotations?key=k", "/platform?key=k"),
+        ("/namespaces?sort=cpu_req_m", "/workloads?sort=cpu_req_m"),
+        ("/helm?format=csv", "/platform?format=csv&table=charts"),
+    ],
+)
+def test_legacy_redirects(admin_client_collected, old, new):
+    r = admin_client_collected.get(old, follow_redirects=False)
+    assert r.status_code == 307 and r.headers["location"] == new
+    assert admin_client_collected.get(old).status_code == 200
+
+
+def test_legacy_helm_csv_is_charts(admin_client_collected):
+    rows = list(csv.reader(io.StringIO(admin_client_collected.get("/helm?format=csv").text)))
+    assert rows[0] == ["chart", "releases", "clusters", "versions"]
+
+
+def test_nav_links(admin_client_collected):
+    text = admin_client_collected.get("/").text
+    nav = text[text.index("<nav>") : text.index("</nav>")]
+    for href in ("/", "/clusters", "/network", "/storage", "/workloads", "/platform",
+                 "/query", "/presets", "/check", "/runs", "/export/discovery", "/admin/users"):  # fmt: skip
+        assert f'href="{href}"' in nav, href
+    assert "Tools" in nav
+    for href in ("/helm", "/crds", "/annotations", "/namespaces", "/inventory"):
+        assert f'href="{href}"' not in text, href

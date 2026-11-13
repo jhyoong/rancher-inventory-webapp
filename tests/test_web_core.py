@@ -176,6 +176,12 @@ def _concrete(path: str) -> str:
 PUBLIC = {"/login", "/static", "/healthz"}
 
 
+LEGACY_REDIRECTS = {
+    "/inventory": "/clusters", "/helm": "/platform", "/crds": "/platform", "/annotations": "/platform",
+    "/namespaces": "/workloads",
+}
+
+
 def test_every_route_needs_a_session(client):
     gets, posts = [], []
     for r in _all_routes(client.app.routes):
@@ -189,8 +195,8 @@ def test_every_route_needs_a_session(client):
     assert "/network" in gets and "/runs" in posts  # the walk found the routers
     for path in gets:
         r = client.get(path, follow_redirects=False)
-        if path == "/inventory":  # plain redirect to /clusters, which needs the session
-            assert r.status_code == 307 and r.headers["location"] == "/clusters"
+        if path in LEGACY_REDIRECTS:  # plain redirect to the new page, which needs the session
+            assert r.status_code == 307 and r.headers["location"] == LEGACY_REDIRECTS[path], path
             continue
         if path.startswith("/api/"):  # JSON API: 401, no redirect
             assert r.status_code == 401, path

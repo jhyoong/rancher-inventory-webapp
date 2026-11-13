@@ -92,14 +92,22 @@ def test_cap_note_only_when_more_rows(admin_client_collected, monkeypatch):
     assert "Showing the first" in admin_client_collected.get("/query?kind=namespaces").text
 
 
-@pytest.mark.parametrize("path", ["/workloads", "/namespaces"])
-def test_page_cap_note_only_when_more_rows(admin_client_collected, monkeypatch, path):
-    total = len(admin_client_collected.get(f"{path}?format=csv").text.strip().splitlines()) - 1
+@pytest.mark.parametrize("path, table", [("/workloads", "workloads"), ("/workloads?table=namespaces", "namespaces")])
+def test_page_cap_note_only_when_more_rows(admin_client_collected, monkeypatch, path, table):
+    sep = "&" if "?" in path else "?"
+    csv_path = f"{path}{sep}format=csv"
+    total = len(admin_client_collected.get(csv_path).text.strip().splitlines()) - 1
     monkeypatch.setattr(queries, "PAGE_LIMIT", total)
-    assert "Showing the first" not in admin_client_collected.get(path).text
+    # the page holds both tables; look at the section of the one under test
+    part = 0 if table == "workloads" else 1
+
+    def section():
+        return admin_client_collected.get(path).text.split('id="namespaces"')[part]
+
+    assert "Showing the first" not in section()
     monkeypatch.setattr(queries, "PAGE_LIMIT", total - 1)
-    assert "Showing the first" in admin_client_collected.get(path).text
-    rows = admin_client_collected.get(f"{path}?format=csv").text.strip().splitlines()
+    assert "Showing the first" in section()
+    rows = admin_client_collected.get(csv_path).text.strip().splitlines()
     assert len(rows) - 1 == total - 1
 
 

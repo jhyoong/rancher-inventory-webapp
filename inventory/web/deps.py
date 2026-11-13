@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import Depends, HTTPException, Request
+from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from inventory.db.connection import connect
@@ -89,6 +90,17 @@ def csv_download(request: Request, user: User, page: str, tables: dict[str, list
         raise HTTPException(400, f"unknown table: {name}")
     log.info("csv download user=%r path=%s table=%s", user.username, request.url.path, name)
     return csv_response(tables[name] or [], f"{page}-{name}.csv", (columns or {}).get(name))
+
+
+def legacy_redirect(request: Request, target: str, csv_table: str) -> RedirectResponse:
+    """307 from a retired page to its new place, keeping the query string.
+
+    A bare CSV link (format=csv without table) gets table=csv_table, so the old CSV URL returns the same table.
+    """
+    query = request.url.query
+    if wants_csv(request) and "table" not in request.query_params:
+        query += ("&" if query else "") + f"table={csv_table}"
+    return RedirectResponse(target + (f"?{query}" if query else ""), status_code=307)
 
 
 def cap_rows(tables: dict[str, list | None], limit: int) -> set[str]:

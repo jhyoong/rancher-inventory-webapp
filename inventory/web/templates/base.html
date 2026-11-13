@@ -14,20 +14,21 @@
     <strong>Rancher inventory</strong>
     <a href="/">Overview</a>
     <a href="/clusters">Clusters</a>
-    <a href="/inventory">Inventory</a>
     <a href="/network">Network</a>
-    <a href="/helm">Helm</a>
-    <a href="/crds">CRDs</a>
-    <a href="/annotations">Annotations</a>
-    <a href="/workloads">Workloads</a>
     <a href="/storage">Storage</a>
-    <a href="/namespaces">Namespaces</a>
+    <a href="/workloads">Workloads</a>
     <a href="/platform">Platform</a>
-    <a href="/query">Query</a>
-    <a href="/presets">Presets</a>
-    <a href="/check">Check</a>
-    <a href="/runs">Runs</a>
-    {% if user.role == "admin" %}<a href="/admin/users">Users</a>{% endif %}
+    <details class="tools">
+      <summary>Tools</summary>
+      <div>
+        <a href="/query">Query</a>
+        <a href="/presets">Presets</a>
+        <a href="/check">Check</a>
+        <a href="/runs">Runs</a>
+        {% if user.role == "admin" %}<a href="/export/discovery">Export</a>
+        <a href="/admin/users">Users</a>{% endif %}
+      </div>
+    </details>
     <span class="spacer"></span>
     <span class="muted">{{ user.username }} ({{ user.role }})</span>
     <form method="post" action="/logout" class="inline">

@@ -73,8 +73,11 @@ def test_helm_matches_catalog(collected_db, dev_lists, open_db):
 
 
 def test_crds_custom_toggle(admin_client_collected):
-    assert "management.cattle.io" in admin_client_collected.get("/crds").text
-    assert "management.cattle.io" not in admin_client_collected.get("/crds?custom_only=1").text
+    def crd_section(path):  # API versions above it also list management.cattle.io
+        return admin_client_collected.get(path).text.split('id="crds"')[1].split('id="annotations"')[0]
+
+    assert "management.cattle.io" in crd_section("/crds")
+    assert "management.cattle.io" not in crd_section("/crds?custom_only=1")
 
 
 def test_annotations_page(collected_db, admin_client_collected, open_db):
@@ -197,9 +200,9 @@ def test_annotation_objects_cap_note(admin_client_collected, monkeypatch, open_d
         key = queries.annotation_keys(conn)[0]["key"]
     finally:
         conn.close()
-    from inventory.web.routes import annotations as ann_route
+    from inventory.web.routes import platform as ann_route
 
     monkeypatch.setattr(ann_route, "ANNOTATION_LIMIT", 1, raising=False)
     from urllib.parse import quote
 
-    assert "Showing the first 1 rows." in admin_client_collected.get(f"/annotations?key={quote(key)}").text
+    assert "Showing the first 1 rows." in admin_client_collected.get(f"/platform?key={quote(key)}").text

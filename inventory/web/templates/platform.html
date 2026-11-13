@@ -64,4 +64,63 @@
   <tr><td colspan="4">None.</td></tr>
   {% endfor %}
 </table>
+<h2 id="helm">Helm releases</h2>
+<p>{{ csv_link("charts") }}</p>
+<table>
+  <tr><th>Chart</th><th>Releases</th><th>Clusters</th><th>Versions (clusters)</th></tr>
+  {% for c in charts %}
+  <tr><td><a href="/platform?chart={{ c.chart | urlencode }}#helm">{{ c.chart }}</a></td><td class="r">{{ c.releases }}</td><td class="r">{{ c.clusters }}</td>
+      <td>{% for v in c.versions %}{{ v.version or "?" }} ({{ v.clusters }}){% if not loop.last %}, {% endif %}{% endfor %}</td></tr>
+  {% else %}
+  <tr><td colspan="4">No Helm releases.</td></tr>
+  {% endfor %}
+</table>
+{% if releases is not none %}
+<h3>Releases of {{ chart }}</h3>
+<p>{{ csv_link("releases") }}</p>
+<table>
+  <tr><th>Site</th><th>Cluster</th><th>Namespace</th><th>Release</th><th>Version</th><th>App version</th><th>Status</th><th>Last deployed</th></tr>
+  {% for r in releases %}
+  <tr><td>{{ r.site }}</td><td><a href="/clusters/{{ r.site }}/{{ r.cluster_id }}">{{ r.cluster }}</a></td><td>{{ r.namespace }}</td><td>{{ r.name }}</td>
+      <td>{{ r.version }}</td><td>{{ r.app_version or "" }}</td><td>{{ r.status or "" }}</td><td>{{ r.last_deployed | dt }}</td></tr>
+  {% else %}
+  <tr><td colspan="8">No releases.</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+<h2 id="crds">CRD groups</h2>
+<p>{% if custom_only %}Showing custom groups only. <a href="/platform#crds">Show all</a>{% else %}Showing all groups. <a href="/platform?custom_only=1#crds">Custom only</a>{% endif %}</p>
+<p>{{ csv_link("groups") }}</p>
+<table>
+  <tr><th>Group</th><th>Clusters</th><th>CRDs</th><th>Custom</th></tr>
+  {% for g in groups %}
+  <tr><td>{{ g.group }}</td><td class="r">{{ g.clusters }}</td><td class="r">{{ g.crds }}</td><td>{{ "yes" if g.custom else "no" }}</td></tr>
+  {% else %}
+  <tr><td colspan="4">None.</td></tr>
+  {% endfor %}
+</table>
+<h2 id="annotations">Custom annotation keys</h2>
+<p>{{ csv_link("keys") }}</p>
+<table>
+  <tr><th>Key</th><th>Objects</th><th>Clusters</th></tr>
+  {% for k in keys %}
+  <tr><td><a href="/platform?key={{ k.key | urlencode }}#annotations">{{ k.key }}</a></td><td class="r">{{ k.objects }}</td><td class="r">{{ k.clusters }}</td></tr>
+  {% else %}
+  <tr><td colspan="3">None.</td></tr>
+  {% endfor %}
+</table>
+{% if objects is not none %}
+<h3>Objects with {{ key }}</h3>
+<p>{{ csv_link("objects") }}</p>
+{% if 'objects' in capped %}<p class="warn">Showing the first {{ max_rows }} rows.</p>{% endif %}
+<table>
+  <tr><th>Site</th><th>Cluster</th><th>Kind</th><th>Namespace</th><th>Name</th><th>Value</th></tr>
+  {% for o in objects %}
+  <tr><td>{{ o.site }}</td><td><a href="/clusters/{{ o.site }}/{{ o.cluster_id }}">{{ o.cluster }}</a></td><td>{{ o.kind }}</td>
+      <td>{{ o.namespace }}</td><td>{{ o.name }}</td><td>{{ o.value }}</td></tr>
+  {% else %}
+  <tr><td colspan="6">None.</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
 {% endblock %}

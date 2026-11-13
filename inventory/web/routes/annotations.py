@@ -1,26 +1,11 @@
-import sqlite3
+from fastapi import APIRouter, Request
 
-from fastapi import APIRouter, Depends, Request
-
-from inventory.web import queries
-from inventory.web.auth import User
-from inventory.web.deps import cap_rows, csv_download, current_user, read_db, render, wants_csv
+from inventory.web.deps import legacy_redirect
 
 router = APIRouter()
 
-ANNOTATION_LIMIT = 5000  # rows in the objects list, like the /query cap
-
 
 @router.get("/annotations")
-def annotations(request: Request, conn: sqlite3.Connection = Depends(read_db), user: User = Depends(current_user)):
-    key = request.query_params.get("key", "").strip()
-    objects = queries.annotation_objects(conn, key, limit=ANNOTATION_LIMIT + 1) if key else None
-    keys = queries.annotation_keys(conn)
-    capped = cap_rows({"objects": objects}, ANNOTATION_LIMIT)
-    if wants_csv(request):
-        tables = {"keys": keys} | ({"objects": objects} if objects is not None else {})
-        return csv_download(request, user, "annotations", tables)
-    return render(
-        request, conn, user, "annotations.html", keys=keys, key=key, objects=objects, max_rows=ANNOTATION_LIMIT,
-        capped=capped,
-    )
+def annotations(request: Request):
+    """Annotation keys are now a section of the Platform page; the query string and CSV links are kept."""
+    return legacy_redirect(request, "/platform", "keys")

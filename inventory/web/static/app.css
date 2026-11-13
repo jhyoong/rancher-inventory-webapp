@@ -32,3 +32,6 @@ button { cursor: pointer; }
 .badge.complexity { background: #efe3f7; }
 .badge.hostpath { background: #fff4d6; color: #8a5a00; }
 pre.cell { margin: 0; font-size: 0.8rem; white-space: pre-wrap; }
+nav details.tools { position: relative; }
+nav details.tools summary { cursor: pointer; color: #24569b; }
+nav details.tools div { position: absolute; z-index: 1; background: #fff; border: 1px solid #ddd; padding: 0.4rem 0.8rem; display: flex; flex-direction: column; gap: 0.3rem; }

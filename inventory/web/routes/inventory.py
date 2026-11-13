@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Request
-from fastapi.responses import RedirectResponse
+
+from inventory.web.deps import legacy_redirect
 
 router = APIRouter()
 
@@ -7,5 +8,4 @@ router = APIRouter()
 @router.get("/inventory")
 def inventory(request: Request):
     """The Inventory page is now the Clusters page; filters and format=csv are kept."""
-    query = request.url.query
-    return RedirectResponse("/clusters" + (f"?{query}" if query else ""), status_code=307)
+    return legacy_redirect(request, "/clusters", "inventory")

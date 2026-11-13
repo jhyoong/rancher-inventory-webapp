@@ -148,9 +148,9 @@ def test_daemonset_ready_shown(admin_client_collected, dev_lists):
 
 @pytest.mark.parametrize("sort", ["cpu_req_m", "cpu_used_m", "mem_req_b", "mem_used_b", "restarts"])
 def test_namespaces_page_sorts(admin_client_collected, sort):
-    r = admin_client_collected.get(f"/namespaces?sort={sort}")
+    r = admin_client_collected.get(f"/workloads?sort={sort}")
     assert r.status_code == 200 and "kube-system" in r.text and "local" in r.text
 
 
 def test_namespaces_page_rejects_unknown_sort(admin_client_collected):
-    assert admin_client_collected.get("/namespaces?sort=name;drop").status_code == 400
+    assert admin_client_collected.get("/workloads?sort=name;drop").status_code == 400
