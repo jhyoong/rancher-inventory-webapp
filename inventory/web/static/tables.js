@@ -7,7 +7,7 @@
     if (LAST.indexOf(t.toLowerCase()) !== -1) return { last: true };
     var m = t.match(/^(-?\d+(?:\.\d+)?)\s*(B|KiB|MiB|GiB|TiB)\b/);
     if (m) return { num: parseFloat(m[1]) * UNITS[m[2]] };
-    m = t.match(/-?\d+(?:\.\d+)?/);
+    m = t.match(/^[-+]?\d+(?:\.\d+)?/);
     if (m) return { num: parseFloat(m[0]) };
     return { text: t.toLowerCase() };
   }
@@ -20,27 +20,42 @@
     return a.text < b.text ? -1 : a.text > b.text ? 1 : 0;
   }
 
+  function isData(r) {
+    return !(r.cells.length === 1 && r.cells[0].colSpan > 1);
+  }
+
+  // Data rows with the single-cell colspan rows (detail rows) that follow them.
+  // The colspan rows are not sorted or filtered; they stay with their data row.
+  function groups(table) {
+    var out = [];
+    Array.prototype.slice.call(table.rows, 1).forEach(function (r) {
+      if (isData(r)) out.push({ row: r, extras: [] });
+      else if (out.length) out[out.length - 1].extras.push(r);
+    });
+    return out;
+  }
+
   function sortBy(table, headers, col, th) {
     var asc = th.getAttribute("aria-sort") !== "ascending";
     var body = table.tBodies[0];
-    var rows = Array.prototype.slice.call(body.rows).filter(function (r) {
-      return r !== table.rows[0];
-    });
-    var keyed = rows.map(function (r, i) {
-      var cell = r.cells[col];
-      return { row: r, i: i, k: cell ? key(cell.textContent) : { last: true } };
+    var keyed = groups(table).map(function (g, i) {
+      var cell = g.row.cells[col];
+      return { g: g, i: i, k: cell ? key(cell.textContent) : { last: true } };
     });
     keyed.sort(function (x, y) {
       // missing values stay last in both directions
       if (x.k.last || y.k.last) return compare(x.k, y.k) || x.i - y.i;
       return (asc ? 1 : -1) * compare(x.k, y.k) || x.i - y.i;
     });
-    keyed.forEach(function (o) { body.appendChild(o.row); });
+    keyed.forEach(function (o) {
+      body.appendChild(o.g.row);
+      o.g.extras.forEach(function (e) { body.appendChild(e); });
+    });
     headers.forEach(function (h) { h.removeAttribute("aria-sort"); });
     th.setAttribute("aria-sort", asc ? "ascending" : "descending");
   }
 
-  function addFilter(table, dataRows) {
+  function addFilter(table) {
     var input = document.createElement("input");
     input.type = "search";
     input.className = "table-filter";
@@ -48,8 +63,9 @@
     input.setAttribute("aria-label", "Filter rows");
     input.addEventListener("input", function () {
       var q = input.value.toLowerCase();
-      dataRows.forEach(function (r) {
-        r.hidden = q !== "" && r.textContent.toLowerCase().indexOf(q) === -1;
+      groups(table).forEach(function (g) {
+        g.row.hidden = q !== "" && g.row.textContent.toLowerCase().indexOf(q) === -1;
+        g.extras.forEach(function (e) { e.hidden = g.row.hidden; });
       });
     });
     table.parentNode.insertBefore(input, table);
@@ -71,8 +87,7 @@
         if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); }
       });
     });
-    var dataRows = Array.prototype.slice.call(table.rows, 1);
-    if (dataRows.length > 10) addFilter(table, dataRows);
+    if (groups(table).length > 10) addFilter(table);
   }
 
   function init(root) {
