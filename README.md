@@ -405,7 +405,7 @@ The pages are built for planning a move from VMware and NSX to Nutanix NKP.
 
 - **Overview (`/`)**: a site picker, fleet totals, charts, a list of clusters that switches between Table and Cards, and a "Removed from Rancher" table. The summary charts show totals, not one bar per cluster, so they stay readable as the fleet grows: capacity, clusters by class, clusters per flag, the 10 largest clusters (switch between vCPU and memory), clusters per site by class, floating IP needs by source, node operating system images, and persistent volumes by storage class.
 - **Remaining / All clusters**: a toggle on the overview. "Remaining" is the default and counts only clusters with status not started, planned or in progress. "All" counts every cluster.
-- **Migration progress charts** (on the overview): clusters per status, status per site, status per wave, and clusters finished over time (only clusters marked migrated or decommissioned count as finished).
+- **Migration progress charts** (on the overview): clusters per status, status per site, and status per wave.
 - **Migration tracking**: each cluster has a status (not started, planned, in progress, migrated, decommissioned, won't migrate), a wave and a note. Edit them on the cluster page, where the change history is also shown. Both roles, admin and viewer, can edit them. The collector does not change them.
 - **Bulk edit**: on the cluster lists, tick clusters and set a status or a wave, or clear the wave, for all of them at once. Notes are not changed in bulk.
 - **Removed from Rancher**: clusters that the collector no longer sees in Rancher. A row is highlighted when the cluster is not marked migrated, decommissioned or won't migrate. Status, wave and note can be edited here too.

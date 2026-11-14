@@ -1,24 +1,17 @@
-// Chart palette for all charts (dataviz reference palette, light mode, categorical slots in fixed order).
-// Other pages can read window.VizPalette; drawing only happens when the overview data is on the page.
-var VizPalette = {
-  series: ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"],
-  text: "#52514e",
-  grid: "#e4e3df",
-  surface: "#fcfcfb"
-};
-
+// Overview charts. The palette is window.VizPalette from theme.js; all charts redraw on a theme change.
 (function () {
   var el = document.getElementById("overview-data");
   if (!el) return;
   var data = JSON.parse(el.textContent);
-  var P = VizPalette;
+  var P = window.VizPalette;
   var GIB = 1073741824;
+  var charts = [];
 
-  Chart.defaults.color = P.text;
   Chart.defaults.animation = false;
 
   function none(id, title) {
     var canvas = document.getElementById(id);
+    if (!canvas) return;  // already replaced on an earlier draw
     var p = document.createElement("p");
     p.className = "muted";
     p.textContent = title + ": not available";
@@ -72,110 +65,26 @@ var VizPalette = {
         }
       }
     });
+    charts.push(chart);
     return chart;
   }
 
   function num(v, div) { return v === null ? null : v / div; }
 
-  // OS donut: slots beyond the eighth fold into "Other"; never a generated colour.
-  // Migration progress. One fixed colour per status, the same on every progress chart.
-  var STATUS_COLOR = {
-    "not started": P.series[3], "planned": P.series[0], "in progress": P.series[6],
-    "migrated": P.series[2], "decommissioned": P.series[5], "won't migrate": P.series[7]
-  };
-  var pr = data.progress;
-  var statuses = pr.by_status.map(function (s) { return s.status; });
-  hbars("progress-chart", "Clusters by migration status", ["All clusters"],
-        pr.by_status.map(function (s) {
-          return { label: s.status + " " + s.count + " (" + s.pct + "%)", color: STATUS_COLOR[s.status], data: [s.count] };
-        }),
-        { stacked: true, legend: true, unit: "clusters", setHrefs: pr.by_status.map(function (s) { return s.href; }) });
-  var picked = new URLSearchParams(window.location.search).get("site") || "";
-  var siteQ = picked ? "&site=" + encodeURIComponent(picked) : "";
-  // Each segment links to the cluster list for its status and site (or wave). "no wave" has no wave filter, so no link.
-  function byStatus(id, name, rows, key) {
-    hbars(id, name, rows.map(function (r) { return r[key]; }),
-          statuses.map(function (st) {
-            return { label: st, color: STATUS_COLOR[st], data: rows.map(function (r) { return r.counts[st]; }) };
-          }), { stacked: true, legend: true, unit: "clusters",
-                cellHref: function (st, row) {
-                  var base = "/clusters?status=" + encodeURIComponent(st);
-                  if (key === "site") return base + "&site=" + encodeURIComponent(row.site);
-                  return row.wave === "no wave" ? null : base + "&wave=" + encodeURIComponent(row.wave) + siteQ;
-                }, rows: rows });
-  }
-  byStatus("progress-site-chart", "Migration status by site", pr.by_site, "site");
-  byStatus("progress-wave-chart", "Migration status by wave", pr.by_wave, "wave");
-  if (!pr.over_time.length) {
-    none("progress-time-chart", "Clusters finished per day");
-  } else {
-    new Chart(document.getElementById("progress-time-chart"), {
-      type: "line",
-      data: {
-        labels: pr.over_time.map(function (d) { return d.day; }),
-        datasets: [{
-          label: "Finished", data: pr.over_time.map(function (d) { return d.done; }),
-          borderColor: STATUS_COLOR["migrated"], backgroundColor: STATUS_COLOR["migrated"], pointRadius: 2, tension: 0
-        }]
-      },
-      options: {
-        plugins: { title: title("Clusters finished (migrated or decommissioned)"), legend: { display: false } },
-        scales: { y: { beginAtZero: true, ticks: { precision: 0 }, grid: { color: P.grid } }, x: { grid: { display: false } } }
-      }
-    });
-  }
-
-  var os = data.os_images.slice(0, 7);
-  var rest = data.os_images.slice(7).reduce(function (n, o) { return n + o.nodes; }, 0);
-  if (rest) os.push({ os: "Other", nodes: rest });
-  if (!os.length) {
-    none("os-chart", "Nodes by OS image");
-  } else {
-    new Chart(document.getElementById("os-chart"), {
-      type: "doughnut",
-      data: {
-        labels: os.map(function (o) { return o.os; }),
-        datasets: [{
-          data: os.map(function (o) { return o.nodes; }),
-          backgroundColor: P.series, borderColor: P.surface, borderWidth: 2
-        }]
-      },
-      options: { plugins: { title: title("Nodes by OS image"), legend: { position: "bottom", labels: { color: P.text } } } }
-    });
-  }
-
-  // Capacity: sums over clusters that report each figure; the label says how many did.
-  var cap = data.capacity;
-  function capacity(id, name, block, div, unit) {
-    var rows = [["Used", "used"], ["Requested", "req"], ["Allocatable", "alloc"]];
-    var labels = rows.map(function (r) {
-      return r[0] + " (" + block[r[1] + "_n"] + " of " + cap.clusters + " clusters)";
-    });
-    hbars(id, name, labels,
-          [{ label: unit, data: rows.map(function (r) { return num(block[r[1]], div); }), color: P.series[0] }],
-          { unit: unit });
-  }
-  // The memory canvas shares the card of the vCPU canvas.
-  capacity("capacity-chart", "vCPU: used, requested, allocatable", cap.cpu, 1000, "vCPU");
-  capacity("capacity-mem-chart", "Memory: used, requested, allocatable", cap.mem, GIB, "GiB");
-
-  function counts(id, name, items) {
-    hbars(id, name, items.map(function (i) { return i.label; }),
-          [{ label: "Clusters", data: items.map(function (i) { return i.count; }), color: P.series[0] }],
-          { hrefs: items.map(function (i) { return i.href; }), unit: "clusters" });
-  }
-  counts("class-chart", "Clusters by class", data.by_class);
-  counts("flag-chart", "Clusters by flag", data.by_flag);
-
+  var topChart = null, topKey = "cpu";
   var topSets = {
     cpu: { items: data.top_cpu, div: 1000, unit: "vCPU", share: data.top_cpu_share, what: "vCPU" },
     mem: { items: data.top_mem, div: GIB, unit: "GiB", share: data.top_mem_share, what: "memory" }
   };
-  var topChart = null;
   function drawTop(key) {
+    topKey = key;
     var t = topSets[key], canvas = document.getElementById("top-chart");
     var empty = !t.items.some(function (i) { return i.value !== null && i.value > 0; });
-    if (topChart) { topChart.destroy(); topChart = null; }
+    if (topChart) {
+      topChart.destroy();
+      charts.splice(charts.indexOf(topChart), 1);
+      topChart = null;
+    }
     // The canvas stays in the DOM so the toggle can bring the chart back.
     canvas.style.display = empty ? "none" : "";
     var msg = document.getElementById("top-none");
@@ -190,26 +99,111 @@ var VizPalette = {
       ? "Share of all requested " + t.what + ": not available"
       : "Top 10 = " + t.share + "% of all requested " + t.what;
   }
+
+  function draw() {
+    P = window.VizPalette;
+    Chart.defaults.color = P.text;
+    // OS donut: slots beyond the eighth fold into "Other"; never a generated colour.
+    // Migration progress. One fixed colour per status, the same on every progress chart.
+    var STATUS_COLOR = {
+      "not started": P.series[3], "planned": P.series[0], "in progress": P.series[6],
+      "migrated": P.series[2], "decommissioned": P.series[5], "won't migrate": P.series[7]
+    };
+    var pr = data.progress;
+    var statuses = pr.by_status.map(function (s) { return s.status; });
+    hbars("progress-chart", "Clusters by migration status", ["All clusters"],
+          pr.by_status.map(function (s) {
+            return { label: s.status + " " + s.count + " (" + s.pct + "%)", color: STATUS_COLOR[s.status], data: [s.count] };
+          }),
+          { stacked: true, legend: true, unit: "clusters", setHrefs: pr.by_status.map(function (s) { return s.href; }) });
+    var picked = new URLSearchParams(window.location.search).get("site") || "";
+    var siteQ = picked ? "&site=" + encodeURIComponent(picked) : "";
+    // Each segment links to the cluster list for its status and site (or wave). "no wave" has no wave filter, so no link.
+    function byStatus(id, name, rows, key) {
+      hbars(id, name, rows.map(function (r) { return r[key]; }),
+            statuses.map(function (st) {
+              return { label: st, color: STATUS_COLOR[st], data: rows.map(function (r) { return r.counts[st]; }) };
+            }), { stacked: true, legend: true, unit: "clusters",
+                  cellHref: function (st, row) {
+                    var base = "/clusters?status=" + encodeURIComponent(st);
+                    if (key === "site") return base + "&site=" + encodeURIComponent(row.site);
+                    return row.wave === "no wave" ? null : base + "&wave=" + encodeURIComponent(row.wave) + siteQ;
+                  }, rows: rows });
+    }
+    byStatus("progress-site-chart", "Migration status by site", pr.by_site, "site");
+    byStatus("progress-wave-chart", "Migration status by wave", pr.by_wave, "wave");
+
+    var os = data.os_images.slice(0, 7);
+    var rest = data.os_images.slice(7).reduce(function (n, o) { return n + o.nodes; }, 0);
+    if (rest) os.push({ os: "Other", nodes: rest });
+    if (!os.length) {
+      none("os-chart", "Nodes by OS image");
+    } else {
+      charts.push(new Chart(document.getElementById("os-chart"), {
+        type: "doughnut",
+        data: {
+          labels: os.map(function (o) { return o.os; }),
+          datasets: [{
+            data: os.map(function (o) { return o.nodes; }),
+            backgroundColor: P.series, borderColor: P.surface, borderWidth: 2
+          }]
+        },
+        options: { aspectRatio: 1.6, plugins: { title: title("Nodes by OS image"), legend: { position: "bottom", labels: { color: P.text } } } }
+      }));
+    }
+
+    // Capacity: sums over clusters that report each figure; the label says how many did.
+    var cap = data.capacity;
+    function capacity(id, name, block, div, unit) {
+      var rows = [["Used", "used"], ["Requested", "req"], ["Allocatable", "alloc"]];
+      var labels = rows.map(function (r) {
+        return r[0] + " (" + block[r[1] + "_n"] + " of " + cap.clusters + " clusters)";
+      });
+      hbars(id, name, labels,
+            [{ label: unit, data: rows.map(function (r) { return num(block[r[1]], div); }), color: P.series[0] }],
+            { unit: unit });
+    }
+    // The memory canvas shares the card of the vCPU canvas.
+    capacity("capacity-chart", "vCPU: used, requested, allocatable", cap.cpu, 1000, "vCPU");
+    capacity("capacity-mem-chart", "Memory: used, requested, allocatable", cap.mem, GIB, "GiB");
+
+    function counts(id, name, items) {
+      hbars(id, name, items.map(function (i) { return i.label; }),
+            [{ label: "Clusters", data: items.map(function (i) { return i.count; }), color: P.series[0] }],
+            { hrefs: items.map(function (i) { return i.href; }), unit: "clusters" });
+    }
+    counts("class-chart", "Clusters by class", data.by_class);
+    counts("flag-chart", "Clusters by flag", data.by_flag);
+
+    drawTop(topKey);
+
+    // Stacked bars: one bar per site, one series per class in a fixed order.
+    var classes = data.by_class.map(function (c) { return c.label; });
+    hbars("site-class-chart", "Clusters by site and class", data.site_class.map(function (s) { return s.site; }),
+          classes.map(function (c, i) {
+            return { label: c, color: P.series[i], data: data.site_class.map(function (s) { return s.counts[c] || 0; }) };
+          }), { stacked: true, legend: true });
+
+    var fl = data.floating;
+    var sources = [["Load balancer", "lb"], ["External IP", "external_ip"], ["Ingress LB", "ingress_lb"],
+                   ["Node external", "node_external"], ["Control plane", "control_plane"]];
+    hbars("floating-chart", "Floating IP needs by source", ["All clusters"],
+          sources.map(function (s, i) { return { label: s[0], color: P.series[i], data: [fl[s[1]]] }; }),
+          { stacked: true, legend: true });
+
+    var pv = data.pv_by_class;
+    hbars("pv-chart", "Persistent volumes by storage class",
+          pv.map(function (c) { return c.storage_class; }),
+          [{ label: "Volumes", data: pv.map(function (c) { return c.pv_count; }), color: P.series[0] }]);
+  }
+
+  draw();
   document.getElementById("top-cpu-btn").addEventListener("click", function () { drawTop("cpu"); });
   document.getElementById("top-mem-btn").addEventListener("click", function () { drawTop("mem"); });
-  drawTop("cpu");
-
-  // Stacked bars: one bar per site, one series per class in a fixed order.
-  var classes = data.by_class.map(function (c) { return c.label; });
-  hbars("site-class-chart", "Clusters by site and class", data.site_class.map(function (s) { return s.site; }),
-        classes.map(function (c, i) {
-          return { label: c, color: P.series[i], data: data.site_class.map(function (s) { return s.counts[c] || 0; }) };
-        }), { stacked: true, legend: true });
-
-  var fl = data.floating;
-  var sources = [["Load balancer", "lb"], ["External IP", "external_ip"], ["Ingress LB", "ingress_lb"],
-                 ["Node external", "node_external"], ["Control plane", "control_plane"]];
-  hbars("floating-chart", "Floating IP needs by source", ["All clusters"],
-        sources.map(function (s, i) { return { label: s[0], color: P.series[i], data: [fl[s[1]]] }; }),
-        { stacked: true, legend: true });
-
-  var pv = data.pv_by_class;
-  hbars("pv-chart", "Persistent volumes by storage class",
-        pv.map(function (c) { return c.storage_class; }),
-        [{ label: "Volumes", data: pv.map(function (c) { return c.pv_count; }), color: P.series[0] }]);
+  document.addEventListener("themechange", function () {
+    charts.forEach(function (c) { c.destroy(); });
+    charts = [];
+    topChart = null;
+    draw();
+  });
 })();

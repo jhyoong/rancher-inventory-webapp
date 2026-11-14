@@ -1,7 +1,7 @@
 """Manual migration tracking: status, wave and note per cluster, with a change log."""
 
 import sqlite3
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timezone
 from urllib.parse import quote
 
 STATUSES = ("not started", "planned", "in progress", "migrated", "decommissioned", "won't migrate")
@@ -133,30 +133,8 @@ def removed(conn: sqlite3.Connection, site: str | None = None) -> list[dict]:
     return out
 
 
-def _over_time(conn: sqlite3.Connection, site: str | None, today: date) -> list[dict]:
-    where, params = ("WHERE site=?", (site,)) if site is not None else ("", ())
-    rows = conn.execute(
-        f"SELECT site, cluster_id, status, date(updated_at) AS day FROM migration_tracking_log {where}"
-        " ORDER BY updated_at, id",
-        params,
-    ).fetchall()
-    if not rows:
-        return []
-    day = date.fromisoformat(rows[0]["day"])
-    latest: dict[tuple[str, str], str] = {}
-    i, out = 0, []
-    while day <= today:
-        iso = day.isoformat()
-        while i < len(rows) and rows[i]["day"] <= iso:
-            latest[(rows[i]["site"], rows[i]["cluster_id"])] = rows[i]["status"]
-            i += 1
-        out.append({"day": iso, "done": sum(1 for s in latest.values() if s in DONE)})
-        day += timedelta(days=1)
-    return out
-
-
-def progress(conn: sqlite3.Connection, site: str | None = None, today: date | None = None) -> dict:
-    """Counts by status, site and wave, plus finished clusters per day.
+def progress(conn: sqlite3.Connection, site: str | None = None) -> dict:
+    """Counts by status, site and wave.
 
     Clusters are the current ones plus those removed from Rancher.
     """
@@ -188,5 +166,4 @@ def progress(conn: sqlite3.Connection, site: str | None = None, today: date | No
         ],
         "by_site": [{"site": k, "counts": by_site[k]} for k in sorted(by_site)],
         "by_wave": [{"wave": w, "counts": by_wave[w]} for w in waves],
-        "over_time": _over_time(conn, site, today or datetime.now(timezone.utc).date()),
     }

@@ -3,7 +3,7 @@ import io
 import json
 import re
 import shutil
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 import pytest
 from inventory.web import tracking
 
@@ -81,28 +81,16 @@ def test_progress_scoped_by_site(tracked_conn):
 
 
 @pytest.mark.live
-def test_progress_waves_and_over_time(tracked_conn):
+def test_progress_by_wave(tracked_conn):
     n = _count(tracked_conn)
     d = datetime(2026, 11, 1, 12, tzinfo=timezone.utc)
     tracking.save(tracked_conn, 1, "dev", "local", "local", status="migrated", wave="wave 1", now=d)
-    p = tracking.progress(tracked_conn, today=date(2026, 11, 3))
+    p = tracking.progress(tracked_conn)
     zero = {s: 0 for s in tracking.STATUSES}
     assert p["by_wave"][0] == {"wave": "wave 1", "counts": {**zero, "migrated": 1}}
     if n > 1:
         assert p["by_wave"][1] == {"wave": "no wave", "counts": {**zero, "not started": n - 1}}
     assert len(p["by_wave"]) == (2 if n > 1 else 1)
-    assert p["over_time"] == [{"day": "2026-11-01", "done": 1}, {"day": "2026-11-02", "done": 1},
-                              {"day": "2026-11-03", "done": 1}]
-
-
-@pytest.mark.live
-def test_over_time_drops_when_status_moves_back(tracked_conn):
-    t0 = datetime(2026, 11, 1, 23, 59, tzinfo=timezone.utc)
-    tracking.save(tracked_conn, 1, "dev", "local", "local", status="migrated", now=t0)
-    tracking.save(tracked_conn, 1, "dev", "local", "local", status="in progress", now=t0.replace(day=2))
-    p = tracking.progress(tracked_conn, today=date(2026, 11, 2))
-    assert p["over_time"] == [{"day": "2026-11-01", "done": 1}, {"day": "2026-11-02", "done": 0}]
-    assert tracking.progress(tracked_conn, site="nope", today=date(2026, 11, 2))["over_time"] == []
 
 
 # ---- web: edit tracking ----

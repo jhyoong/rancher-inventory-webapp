@@ -5,20 +5,20 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Rancher inventory{% endblock %}</title>
   <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/theme.js"></script>
   <script src="/static/htmx.min.js"></script>
   <script src="/static/tables.js" defer></script>
 </head>
 <body>
 {% if user %}
+{% set path = request.url.path if request else "" %}
 <header>
   <nav>
-    <strong>Rancher inventory</strong>
-    <a href="/">Overview</a>
-    <a href="/clusters">Clusters</a>
-    <a href="/network">Network</a>
-    <a href="/storage">Storage</a>
-    <a href="/workloads">Workloads</a>
-    <a href="/platform">Platform</a>
+    <strong class="brand">Rancher inventory</strong>
+    <a href="/"{% if path == "/" %} aria-current="page"{% endif %}>Overview</a>
+    {% for href, label in [("/clusters", "Clusters"), ("/network", "Network"), ("/storage", "Storage"), ("/workloads", "Workloads"), ("/platform", "Platform")] %}
+    <a href="{{ href }}"{% if path.startswith(href) %} aria-current="page"{% endif %}>{{ label }}</a>
+    {% endfor %}
     <details class="tools">
       <summary>Tools</summary>
       <div>
@@ -31,7 +31,8 @@
       </div>
     </details>
     <span class="spacer"></span>
-    <span class="muted">{{ user.username }} ({{ user.role }})</span>
+    <button type="button" id="theme-toggle">Dark mode</button>
+    <span class="muted user">{{ user.username }} ({{ user.role }})</span>
     <form method="post" action="/logout" class="inline">
       <input type="hidden" name="csrf" value="{{ csrf }}">
       <button type="submit">Log out</button>

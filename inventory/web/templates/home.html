@@ -27,7 +27,6 @@
   <div class="chart"><canvas id="progress-chart" aria-label="Clusters by migration status"></canvas></div>
   <div class="chart"><canvas id="progress-site-chart" aria-label="Migration status by site"></canvas></div>
   <div class="chart"><canvas id="progress-wave-chart" aria-label="Migration status by wave"></canvas></div>
-  <div class="chart"><canvas id="progress-time-chart" aria-label="Clusters finished per day"></canvas></div>
 </div>
 <p class="scope-links">Summary charts:
   {% for l in scope_links %}<a href="{{ l.href }}"{% if l.active %} aria-current="page"{% endif %}>{{ l.label }}</a>{% if not loop.last %} | {% endif %}{% endfor %}

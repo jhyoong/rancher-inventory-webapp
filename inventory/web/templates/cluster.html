@@ -254,19 +254,18 @@
 </div>
 <script type="application/json" id="metrics-data">{{ metrics | tojson }}</script>
 <script src="/static/chart.umd.min.js"></script>
-<script src="/static/overview.js"></script>
 <script>
 (function () {
-  // Same palette as the overview charts (VizPalette from overview.js).
-  var P = window.VizPalette;
+  // Same palette as the overview charts (VizPalette from theme.js); redrawn on a theme change.
   var rows = JSON.parse(document.getElementById("metrics-data").textContent);
   var days = rows.map(function (r) { return r.day; });
-  Chart.defaults.color = P.text;
+  var charts = [];
   function series(key, div) {
     return rows.map(function (r) { return r[key] === null ? null : r[key] / div; });
   }
   function draw(id, title, keys, div) {
-    new Chart(document.getElementById(id), {
+    var P = window.VizPalette;
+    charts.push(new Chart(document.getElementById(id), {
       type: "line",
       data: {
         labels: days,
@@ -276,10 +275,19 @@
       },
       options: { animation: false, plugins: { title: { display: true, text: title, color: P.text } },
                  scales: { x: { grid: { display: false } }, y: { beginAtZero: true, grid: { color: P.grid } } } }
-    });
+    }));
   }
-  draw("cpu-chart", "vCPU", ["cpu_alloc_m", "cpu_req_m", "cpu_used_m"], 1000);
-  draw("mem-chart", "Memory GiB", ["mem_alloc_b", "mem_req_b", "mem_used_b"], 1073741824);
+  function drawAll() {
+    Chart.defaults.color = window.VizPalette.text;
+    draw("cpu-chart", "vCPU", ["cpu_alloc_m", "cpu_req_m", "cpu_used_m"], 1000);
+    draw("mem-chart", "Memory GiB", ["mem_alloc_b", "mem_req_b", "mem_used_b"], 1073741824);
+  }
+  drawAll();
+  document.addEventListener("themechange", function () {
+    charts.forEach(function (c) { c.destroy(); });
+    charts = [];
+    drawAll();
+  });
 })();
 </script>
 {% else %}
