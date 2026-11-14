@@ -255,3 +255,40 @@ def test_overview_progress_and_removed(tracked_client, tracked_conn):
     assert 'id="removed"' in other.text
     assert "gone" not in other.text.split('id="removed"')[1]
     assert 'value="/?site=dev#removed"' in tracked_client.get("/?site=dev").text.split('id="removed"')[1]
+
+
+# ---- overview scope ----
+
+@pytest.mark.live
+def test_charts_leave_out_finished_clusters(tracked_conn, tracked_settings):
+    from inventory.collector.rules import load_rules
+    from inventory.web.migration import site_overview
+
+    rules = load_rules(tracked_settings)
+    clusters = site_overview(tracked_conn, rules, scope="all")["clusters"]
+    n = len(clusters)
+    local = next(c for c in clusters if c["cluster_id"] == "local")
+    tracking.save(tracked_conn, 1, local["site"], "local", local["name"], status="migrated")
+    if n > 1:
+        assert site_overview(tracked_conn, rules)["charts"]["capacity"]["clusters"] == n - 1
+    for c in clusters:
+        tracking.save(tracked_conn, 1, c["site"], c["cluster_id"], c["name"], status="migrated")
+    rem = site_overview(tracked_conn, rules)
+    assert rem["charts"]["capacity"]["clusters"] == 0
+    assert rem["charts"]["os_images"] == [] and rem["charts"]["by_class"] == []
+    assert rem["charts"]["pv_by_class"] == []
+    assert rem["charts"]["scope"] == "remaining"
+    assert rem["totals"]["clusters"] == n
+    every = site_overview(tracked_conn, rules, scope="all")
+    assert every["charts"]["capacity"]["clusters"] == n
+    assert sum(x["nodes"] for x in every["charts"]["os_images"]) == every["totals"]["nodes"]
+    with pytest.raises(ValueError):
+        site_overview(tracked_conn, rules, scope="bogus")
+
+
+@pytest.mark.live
+def test_scope_links(tracked_client):
+    html = tracked_client.get("/?scope=all&site=dev").text
+    assert 'aria-current="page">All clusters' in html
+    assert "scope=remaining&amp;site=dev" in html or "site=dev&amp;scope=remaining" in html
+    assert 'aria-current="page">Remaining clusters' in tracked_client.get("/?scope=bogus").text

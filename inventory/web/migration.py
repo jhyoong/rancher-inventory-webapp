@@ -512,33 +512,57 @@ def _chart_inputs(rows: list[dict], site: str | None) -> dict:
     }
 
 
-def site_overview(conn: sqlite3.Connection, rules: Rules, site: str | None = None) -> dict:
-    """Totals and chart data for the overview page, for one site or all sites."""
+def site_overview(conn: sqlite3.Connection, rules: Rules, site: str | None = None, scope: str = "remaining") -> dict:
+    """Totals and chart data for the overview page, for one site or all sites.
+
+    scope "remaining" builds the charts only from clusters still left to move (status in
+    tracking.REMAINING); "all" uses every cluster. Totals and the cluster list always use all.
+    """
+    if scope not in ("remaining", "all"):
+        raise ValueError(f"unknown scope: {scope}")
     rows = cluster_rows(conn, rules, site=site)
+    chart_rows = rows if scope == "all" else [r for r in rows if r["status"] in tracking.REMAINING]
+    keep = {(r["site"], r["cluster_id"]) for r in chart_rows}
     r_where, r_args = _scope(site, None, "r")
-    os_images = [
-        {"os": r["os"], "nodes": r["nodes"]}
-        for r in conn.execute(
-            f"""SELECT COALESCE(json_extract(r.data, '$.status.nodeInfo.osImage'), 'not collected') AS os,
-                       COUNT(*) AS nodes
-                FROM resources r WHERE r.kind = 'nodes'{r_where} GROUP BY os ORDER BY nodes DESC, os""",
-            r_args,
-        )
-    ]
-    pv_by_class: dict[str, dict] = {}
+    os_all: dict[tuple[str, str], dict[str, int]] = {}
+    for r in conn.execute(
+        f"""SELECT r.site, r.cluster_id,
+                   COALESCE(json_extract(r.data, '$.status.nodeInfo.osImage'), 'not collected') AS os,
+                   COUNT(*) AS nodes
+            FROM resources r WHERE r.kind = 'nodes'{r_where} GROUP BY r.site, r.cluster_id, os""",
+        r_args,
+    ):
+        os_all.setdefault((r["site"], r["cluster_id"]), {})[r["os"]] = r["nodes"]
+
+    def os_sum(keys) -> list[dict]:
+        sums: dict[str, int] = {}
+        for k in keys:
+            for os_name, n in os_all.get(k, {}).items():
+                sums[os_name] = sums.get(os_name, 0) + n
+        return [{"os": o, "nodes": n} for o, n in sorted(sums.items(), key=lambda x: (-x[1], x[0]))]
+
+    pv_all: dict[tuple[str, str], dict[str, dict]] = {}
     for v in conn.execute(
-        f"""SELECT COALESCE(json_extract(r.data, '$.spec.storageClassName'), 'none') AS storage_class,
+        f"""SELECT r.site, r.cluster_id,
+                   COALESCE(json_extract(r.data, '$.spec.storageClassName'), 'none') AS storage_class,
                    json_extract(r.data, '$.spec.capacity.storage') AS size
             FROM resources r WHERE r.kind = 'persistentvolumes'{r_where}""",
         r_args,
     ):
-        c = pv_by_class.setdefault(v["storage_class"], {"storage_class": v["storage_class"], "pv_count": 0, "bytes": 0})
+        per = pv_all.setdefault((v["site"], v["cluster_id"]), {})
+        c = per.setdefault(v["storage_class"], {"storage_class": v["storage_class"], "pv_count": 0, "bytes": 0})
         c["pv_count"] += 1
         c["bytes"] += _quantity(parse_bytes, v["size"]) or 0  # an unparsable size counts as unknown
+    pv_by_class: dict[str, dict] = {}
+    for k in keep:
+        for name, c in pv_all.get(k, {}).items():
+            t = pv_by_class.setdefault(name, {"storage_class": name, "pv_count": 0, "bytes": 0})
+            t["pv_count"] += c["pv_count"]
+            t["bytes"] += c["bytes"]
     return {
         "totals": {
             "clusters": len(rows),
-            "nodes": sum(o["nodes"] for o in os_images),
+            "nodes": sum(n for per in os_all.values() for n in per.values()),
             "cpu_alloc_m": sum(r["cpu_alloc_m"] or 0 for r in rows),
             "mem_alloc_b": sum(r["mem_alloc_b"] or 0 for r in rows),
             "pv_count": sum(r["pv_count"] for r in rows),
@@ -547,9 +571,10 @@ def site_overview(conn: sqlite3.Connection, rules: Rules, site: str | None = Non
             "special_network_clusters": sum(1 for r in rows if "special-network-config" in r["flags"]),
         },
         "charts": {
-            "os_images": os_images,
+            "scope": scope,
+            "os_images": os_sum(keep),
             "pv_by_class": sorted(pv_by_class.values(), key=lambda c: (-c["pv_count"], c["storage_class"])),
-            **_chart_inputs(rows, site),
+            **_chart_inputs(chart_rows, site),
         },
         "clusters": rows,
     }  # fmt: skip

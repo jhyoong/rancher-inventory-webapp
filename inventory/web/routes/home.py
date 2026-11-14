@@ -28,15 +28,21 @@ def home(request: Request, conn: sqlite3.Connection = Depends(read_db), user: Us
     site = q.get("site", "").strip()
     view = q.get("view") if q.get("view") in VIEWS else "table"
     rules = load_rules(get_settings(request))
-    data = migration.site_overview(conn, rules, site=site or None)
+    scope = q.get("scope") if q.get("scope") in ("remaining", "all") else "remaining"
+    data = migration.site_overview(conn, rules, site=site or None, scope=scope)
     progress = tracking.progress(conn, site or None)
     removed = tracking.removed(conn, site or None)
     params = ([("site", site)] if site else []) + ([("view", q["view"])] if q.get("view") in VIEWS else [])
+    keep = ([("site", site)] if site else []) + ([("view", view)] if view != "table" else [])
+    scope_links = [
+        {"label": label, "href": "/?" + urlencode(keep + [("scope", key)]), "active": key == scope}
+        for key, label in (("remaining", "Remaining clusters"), ("all", "All clusters"))
+    ]
     removed_next = "/" + ("?" + urlencode(params) if params else "") + "#removed"
     for r in removed:
         r["removed_day"] = _day(r["removed_at"])
     return render(
         request, conn, user, "home.html", overview=queries.overview(conn),
-        site=site, view=view, data=data, progress=progress, removed=removed, removed_next=removed_next, chart_data={**data["charts"], "progress": progress},
+        site=site, view=view, scope_links=scope_links, data=data, progress=progress, removed=removed, removed_next=removed_next, chart_data={**data["charts"], "progress": progress},
         site_names=queries.site_names(conn), optins=active(rules),
     )  # fmt: skip
