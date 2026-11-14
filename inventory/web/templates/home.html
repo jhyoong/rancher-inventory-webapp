@@ -22,11 +22,21 @@
 </div>
 <p class="muted">Opt-in collectors: {{ optins | join(", ") if optins else "none active" }}</p>
 <div class="charts">
-  <div class="chart"><canvas id="os-chart" aria-label="Nodes by OS image"></canvas></div>
-  <div class="chart"><canvas id="cpu-chart" aria-label="vCPU per cluster"></canvas></div>
-  <div class="chart"><canvas id="mem-chart" aria-label="Memory per cluster"></canvas></div>
-  <div class="chart"><canvas id="pv-chart" aria-label="Persistent volumes by storage class"></canvas></div>
+  <div class="chart">
+    <canvas id="capacity-chart" aria-label="vCPU capacity, requests and use"></canvas>
+    <canvas id="capacity-mem-chart" aria-label="Memory capacity, requests and use"></canvas>
+  </div>
+  <div class="chart"><canvas id="class-chart" aria-label="Clusters by class"></canvas></div>
+  <div class="chart"><canvas id="flag-chart" aria-label="Clusters by flag"></canvas></div>
+  <div class="chart">
+    <div><button type="button" id="top-cpu-btn">vCPU</button> <button type="button" id="top-mem-btn">Memory</button></div>
+    <canvas id="top-chart" aria-label="Top 10 clusters by requested vCPU or memory"></canvas>
+    <p class="muted" id="top-share"></p>
+  </div>
+  <div class="chart"><canvas id="site-class-chart" aria-label="Clusters by site and class"></canvas></div>
   <div class="chart"><canvas id="floating-chart" aria-label="Floating IP needs by source"></canvas></div>
+  <div class="chart"><canvas id="os-chart" aria-label="Nodes by OS image"></canvas></div>
+  <div class="chart"><canvas id="pv-chart" aria-label="Persistent volumes by storage class"></canvas></div>
 </div>
 <script type="application/json" id="overview-data">{{ data.charts | tojson }}</script>
 <script src="/static/chart.umd.min.js"></script>

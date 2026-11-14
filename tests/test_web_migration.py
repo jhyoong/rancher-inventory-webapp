@@ -400,3 +400,12 @@ def test_old_inventory_csv_columns(admin_client_collected, collected_db, open_db
     assert local["crd_group_list"].startswith("[")
     old = admin_client_collected.get("/inventory?format=csv")
     assert old.status_code == 200 and old.text.splitlines()[0] == text.splitlines()[0]
+
+
+def test_home_has_summary_charts(admin_client_collected):
+    html = admin_client_collected.get("/").text
+    ids = ["capacity-chart", "class-chart", "flag-chart", "top-chart", "site-class-chart",
+           "floating-chart", "os-chart", "pv-chart"]
+    positions = [html.index(f'id="{i}"') for i in ids]
+    assert positions == sorted(positions)
+    assert 'id="cpu-chart"' not in html and 'id="mem-chart"' not in html

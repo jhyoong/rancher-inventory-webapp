@@ -29,7 +29,7 @@ button { cursor: pointer; }
 .card { background: #fff; border: 1px solid #ddd; padding: 0.8rem 1.2rem; min-width: 8rem; }
 .card .num { font-size: 1.8rem; font-weight: bold; }
 .charts { display: flex; flex-wrap: wrap; gap: 1rem; }
-.chart { background: #fff; border: 1px solid #ddd; width: 32rem; padding: 0.5rem; }
+.chart { background: #fff; border: 1px solid #ddd; min-width: 32rem; flex: 1 1 32rem; padding: 0.5rem; }
 .login { max-width: 22rem; margin: 4rem auto; }
 .login label { display: block; margin-bottom: 0.6rem; }
 .login input { display: block; width: 100%; box-sizing: border-box; }
