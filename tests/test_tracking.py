@@ -1,5 +1,7 @@
 import csv
 import io
+import json
+import re
 import shutil
 from datetime import date, datetime, timezone
 import pytest
@@ -235,3 +237,21 @@ def test_removed_cluster_page(tracked_client, tracked_conn):
     r = tracked_client.post("/clusters/dev/c-gone/migration", data={"status": "decommissioned", "csrf": tracked_client.csrf}, follow_redirects=False)
     assert r.status_code == 303
     assert tracking.history(tracked_conn, "dev", "c-gone")[0]["name"] == "gone"
+
+
+@pytest.mark.live
+def test_overview_progress_and_removed(tracked_client, tracked_conn):
+    tracked_conn.execute("INSERT INTO removed_clusters VALUES ('dev', 'c-gone', 'gone', '2026-11-10T00:00:00+00:00')")
+    tracked_conn.commit()
+    html = tracked_client.get("/").text
+    assert html.index('id="progress-chart"') < html.index('id="capacity-chart"')
+    assert 'id="removed"' in html and "not marked done" in html
+    assert "2026-11-10" in html.split('id="removed"')[1]
+    assert 'value="/#removed"' in html.split('id="removed"')[1]
+    data = json.loads(re.search(r'id="overview-data">(.*?)</script>', html, re.S).group(1))
+    assert data["progress"]["total"] == _count(tracked_conn) + 1
+    other = tracked_client.get("/?site=other")
+    assert other.status_code == 200
+    assert 'id="removed"' in other.text
+    assert "gone" not in other.text.split('id="removed"')[1]
+    assert 'value="/?site=dev#removed"' in tracked_client.get("/?site=dev").text.split('id="removed"')[1]

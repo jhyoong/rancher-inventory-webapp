@@ -12,6 +12,19 @@
 {% macro _lb(r) %}{% if not r.collected %}not collected{% else %}{{ r.floating.implementations | join(", ") if r.floating.implementations else "none" }}{% endif %}{% endmacro %}
 {% macro _watch_out(r) %}{% if not r.collected %}not collected{% else %}{{ watch_out(r.site, r.cluster_id, r.flags, r.complexity) }}{% endif %}{% endmacro %}
 
+{# the hidden fields and the bar of a bulk edit form; the caller opens the form and lists the rows #}
+{% macro bulk_bar(next) %}
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<input type="hidden" name="next" value="{{ next }}">
+<p class="bulk-bar">
+  <label>Status <select name="status"><option value="">no change</option>
+    {% for s in statuses %}<option>{{ s }}</option>{% endfor %}</select></label>
+  <label>Wave <input name="wave" maxlength="{{ wave_max }}" placeholder="no change"></label>
+  <label><input type="checkbox" name="clear_wave" value="1"> Clear wave</label>
+  <button type="submit">Apply to selected</button>
+</p>
+{% endmacro %}
+
 {% macro cluster_list(rows, view) %}
 <p class="view-switch">
   <a href="{{ request.url.include_query_params(view='table') }}"{% if view == "table" %} aria-current="page"{% endif %}>Table</a> |
@@ -46,15 +59,7 @@
 </div>
 {% else %}
 <form method="post" action="/migration/bulk" class="bulk-edit">
-<input type="hidden" name="csrf" value="{{ csrf }}">
-<input type="hidden" name="next" value="{{ request.url.path }}{% if request.url.query %}?{{ request.url.query }}{% endif %}">
-<p class="bulk-bar">
-  <label>Status <select name="status"><option value="">no change</option>
-    {% for s in statuses %}<option>{{ s }}</option>{% endfor %}</select></label>
-  <label>Wave <input name="wave" maxlength="{{ wave_max }}" placeholder="no change"></label>
-  <label><input type="checkbox" name="clear_wave" value="1"> Clear wave</label>
-  <button type="submit">Apply to selected</button>
-</p>
+{{ bulk_bar(request.url.path ~ ("?" ~ request.url.query if request.url.query else "")) }}
 <table>
   <tr><th class="nosort"><input type="checkbox" data-select-all aria-label="Select all shown"></th>
       <th>Site</th><th>Cluster</th><th>Status</th><th>Wave</th><th>Kubernetes</th><th>Nodes</th><th>Pools</th><th>OS</th>

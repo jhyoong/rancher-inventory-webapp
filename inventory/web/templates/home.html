@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_site_refresh.html" import site_refresh with context %}
-{% from "_cluster_list.html" import cluster_list with context %}
+{% from "_cluster_list.html" import cluster_list, bulk_bar with context %}
 {% block content %}
 <h1>Overview</h1>
 {{ site_refresh(site_names) }}
@@ -21,6 +21,13 @@
   <div class="card"><div class="num">{{ t.special_network_clusters }}</div>Clusters with special network config</div>
 </div>
 <p class="muted">Opt-in collectors: {{ optins | join(", ") if optins else "none active" }}</p>
+<h2>Migration progress</h2>
+<div class="charts">
+  <div class="chart"><canvas id="progress-chart" aria-label="Clusters by migration status"></canvas></div>
+  <div class="chart"><canvas id="progress-site-chart" aria-label="Migration status by site"></canvas></div>
+  <div class="chart"><canvas id="progress-wave-chart" aria-label="Migration status by wave"></canvas></div>
+  <div class="chart"><canvas id="progress-time-chart" aria-label="Clusters finished per day"></canvas></div>
+</div>
 <div class="charts">
   <div class="chart">
     <canvas id="capacity-chart" aria-label="vCPU capacity, requests and use"></canvas>
@@ -39,11 +46,34 @@
   <div class="chart"><canvas id="os-chart" aria-label="Nodes by OS image"></canvas></div>
   <div class="chart"><canvas id="pv-chart" aria-label="Persistent volumes by storage class"></canvas></div>
 </div>
-<script type="application/json" id="overview-data">{{ data.charts | tojson }}</script>
+<script type="application/json" id="overview-data">{{ chart_data | tojson }}</script>
 <script src="/static/chart.umd.min.js"></script>
 <script src="/static/overview.js"></script>
 <h2>Clusters</h2>
 {{ cluster_list(data.clusters, view) }}
+<h2 id="removed">Removed from Rancher</h2>
+{% if removed %}
+<form method="post" action="/migration/bulk" class="bulk-edit">
+{{ bulk_bar(removed_next) }}
+<table>
+  <tr><th class="nosort"><input type="checkbox" data-select-all aria-label="Select all shown"></th>
+      <th>Site</th><th>Cluster</th><th>Removed</th><th>Status</th><th>Wave</th><th>Note</th></tr>
+  {% for r in removed %}
+  <tr{% if not r.done %} class="warn"{% endif %}>
+    <td><input type="checkbox" name="cluster" value="{{ r.site }}/{{ r.cluster_id }}" aria-label="Select {{ r.name or r.cluster_id }}"></td>
+    <td>{{ r.site }}</td>
+    <td><a href="/clusters/{{ r.site }}/{{ r.cluster_id }}">{{ r.name or r.cluster_id }}</a></td>
+    <td>{{ r.removed_day }}</td>
+    <td>{{ r.status }}{% if not r.done %} (not marked done){% endif %}</td>
+    <td>{{ r.wave or "none" }}</td>
+    <td>{{ r.note or "none" }}</td>
+  </tr>
+  {% endfor %}
+</table>
+</form>
+{% else %}
+<p>None.</p>
+{% endif %}
 <h2>Failed clusters in the last run</h2>
 {% if overview.last_run %}
 <p class="muted">Run <a href="/runs/{{ overview.last_run.id }}">{{ overview.last_run.id }}</a>,

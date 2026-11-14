@@ -30,7 +30,7 @@ var VizPalette = {
   }
 
   // Horizontal bars, thin with rounded ends and a surface-coloured gap between fills.
-  // opts.hrefs (one per label, may be null) makes a bar a link.
+  // opts.hrefs (one per label, may be null) makes a bar a link; opts.setHrefs does the same per dataset.
   function hbars(id, name, labels, sets, opts) {
     opts = opts || {};
     var any = sets.some(function (s) {
@@ -38,6 +38,7 @@ var VizPalette = {
     });
     if (!labels.length || !any) return none(id, name);
     var hrefs = opts.hrefs || [];
+    function hrefOf(el) { return opts.setHrefs ? opts.setHrefs[el.datasetIndex] : hrefs[el.index]; }
     var canvas = document.getElementById(id);
     var chart = new Chart(canvas, {
       type: "bar",
@@ -55,10 +56,10 @@ var VizPalette = {
         indexAxis: "y",
         aspectRatio: 520 / (70 + 30 * labels.length),
         onClick: function (evt, els) {
-          if (els.length && hrefs[els[0].index]) window.location = hrefs[els[0].index];
+          if (els.length && hrefOf(els[0])) window.location = hrefOf(els[0]);
         },
         onHover: function (evt, els) {
-          canvas.style.cursor = els.length && hrefs[els[0].index] ? "pointer" : "default";
+          canvas.style.cursor = els.length && hrefOf(els[0]) ? "pointer" : "default";
         },
         plugins: { title: title(name), legend: { display: !!opts.legend, labels: { color: P.text } } },
         scales: {
@@ -74,6 +75,45 @@ var VizPalette = {
   function num(v, div) { return v === null ? null : v / div; }
 
   // OS donut: slots beyond the eighth fold into "Other"; never a generated colour.
+  // Migration progress. One fixed colour per status, the same on every progress chart.
+  var STATUS_COLOR = {
+    "not started": P.series[3], "planned": P.series[0], "in progress": P.series[6],
+    "migrated": P.series[2], "decommissioned": P.series[5], "won't migrate": P.series[7]
+  };
+  var pr = data.progress;
+  var statuses = pr.by_status.map(function (s) { return s.status; });
+  hbars("progress-chart", "Clusters by migration status", ["All clusters"],
+        pr.by_status.map(function (s) {
+          return { label: s.status + " " + s.count + " (" + s.pct + "%)", color: STATUS_COLOR[s.status], data: [s.count] };
+        }),
+        { stacked: true, legend: true, unit: "clusters", setHrefs: pr.by_status.map(function (s) { return s.href; }) });
+  function byStatus(id, name, rows, key) {
+    hbars(id, name, rows.map(function (r) { return r[key]; }),
+          statuses.map(function (st) {
+            return { label: st, color: STATUS_COLOR[st], data: rows.map(function (r) { return r.counts[st]; }) };
+          }), { stacked: true, legend: true, unit: "clusters" });
+  }
+  byStatus("progress-site-chart", "Migration status by site", pr.by_site, "site");
+  byStatus("progress-wave-chart", "Migration status by wave", pr.by_wave, "wave");
+  if (!pr.over_time.length) {
+    none("progress-time-chart", "Clusters finished per day");
+  } else {
+    new Chart(document.getElementById("progress-time-chart"), {
+      type: "line",
+      data: {
+        labels: pr.over_time.map(function (d) { return d.day; }),
+        datasets: [{
+          label: "Finished", data: pr.over_time.map(function (d) { return d.done; }),
+          borderColor: STATUS_COLOR["migrated"], backgroundColor: STATUS_COLOR["migrated"], pointRadius: 2, tension: 0
+        }]
+      },
+      options: {
+        plugins: { title: title("Clusters finished (migrated or decommissioned)"), legend: { display: false } },
+        scales: { y: { beginAtZero: true, ticks: { precision: 0 }, grid: { color: P.grid } }, x: { grid: { display: false } } }
+      }
+    });
+  }
+
   var os = data.os_images.slice(0, 7);
   var rest = data.os_images.slice(7).reduce(function (n, o) { return n + o.nodes; }, 0);
   if (rest) os.push({ os: "Other", nodes: rest });
