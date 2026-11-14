@@ -50,14 +50,16 @@
       },
       options: {
         indexAxis: "y",
-        aspectRatio: 520 / (70 + 30 * labels.length),
+        // Height in pixels from the content (title, bars, a legend that may wrap, axis title), whatever the card width.
+        aspectRatio: (canvas.parentNode.clientWidth || 520) /
+                     (80 + 28 * labels.length + (opts.legend ? 50 : 0) + (opts.unit ? 20 : 0)),
         onClick: function (evt, els) {
           if (els.length && hrefOf(els[0])) window.location = hrefOf(els[0]);
         },
         onHover: function (evt, els) {
           canvas.style.cursor = els.length && hrefOf(els[0]) ? "pointer" : "default";
         },
-        plugins: { title: title(name), legend: { display: !!opts.legend, labels: { color: P.text } } },
+        plugins: { title: title(name), legend: { display: !!opts.legend, labels: { color: P.text, boxWidth: 12, boxHeight: 12 } } },
         scales: {
           x: { stacked: !!opts.stacked, beginAtZero: true, grid: { color: P.grid },
                title: { display: !!opts.unit, text: opts.unit || "" } },

@@ -103,6 +103,8 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px
 input[type="checkbox"], input[type="radio"], progress { accent-color: var(--accent); }
 label { color: var(--ink); }
 form.inline { display: inline; margin: 0; }
+form[method="get"] { margin-bottom: 1rem; }
+form[method="get"] label { display: inline-block; white-space: nowrap; margin: 0 0.4rem 0.4rem 0; }
 .table-filter { display: block; margin-bottom: 0.5rem; min-width: 18rem; }
 .bulk-bar, .view-switch, .scope-links { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; }
 form.migration-form { display: flex; gap: 0.8rem; align-items: flex-end; flex-wrap: wrap; }
