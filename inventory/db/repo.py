@@ -36,6 +36,7 @@ def cluster_api_endpoint(cluster: dict) -> str | None:
 
 def upsert_cluster(conn: sqlite3.Connection, site: str, cluster: dict, run_id: int) -> None:
     with transaction(conn):
+        conn.execute("DELETE FROM removed_clusters WHERE site=? AND cluster_id=?", (site, cluster["id"]))
         conn.execute(
             """INSERT INTO clusters (site, cluster_id, name, state, provider, k8s_version,
                                      labels, node_count, api_endpoint, last_seen_run)

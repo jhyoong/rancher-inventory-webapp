@@ -16,6 +16,7 @@ from inventory.collector.runner import (
 )
 from inventory.collector.thread import next_start
 from inventory.db.connection import connect
+from inventory.web import tracking
 
 
 def test_second_run_refused(db):
@@ -237,6 +238,7 @@ def test_full_run_removes_clusters_gone_from_rancher(collected_db, tmp_path, ope
     conn.execute("COMMIT")
     assert conn.execute("SELECT count(*) FROM resource_labels l JOIN resources r ON r.id=l.resource_id "
                         "WHERE r.cluster_id='c-gone'").fetchone()[0] > 0
+    tracking.save(conn, 1, "dev", "c-gone", "gone", status="migrated")
 
     rid = create_run(conn, "manual", "t", Scope())
     assert asyncio.run(execute_run(s, rid)) == "ok"
@@ -252,6 +254,26 @@ def test_full_run_removes_clusters_gone_from_rancher(collected_db, tmp_path, ope
                         "WHERE r.id IS NULL").fetchone()[0] == 0
     assert count("cluster_metrics", "c-gone") > 0
     assert count("run_clusters", "c-gone") > 0
+    gone = conn.execute("SELECT name, removed_at FROM removed_clusters WHERE cluster_id='c-gone'").fetchone()
+    assert gone is not None and gone["removed_at"]
+    assert conn.execute("SELECT count(*) FROM removed_clusters WHERE cluster_id='local'").fetchone()[0] == 0
+    assert tracking.get(conn, "dev", "c-gone")["status"] == "migrated"
+    assert len(tracking.history(conn, "dev", "c-gone")) == 1
+
+
+@pytest.mark.live
+def test_relisted_cluster_leaves_removed_list(collected_db, tmp_path, open_db):
+    import shutil
+
+    shutil.copy(collected_db.db_path, tmp_path / "inventory.db")
+    s = collected_db.model_copy(update={"data_dir": tmp_path})
+    conn = open_db(s.db_path)
+    conn.execute("INSERT INTO removed_clusters VALUES ('dev', 'local', 'local', '2026-11-10T00:00:00+00:00')")
+    tracking.save(conn, 1, "dev", "local", "local", status="planned")
+    rid = create_run(conn, "manual", "t", Scope())
+    assert asyncio.run(execute_run(s, rid)) == "ok"
+    assert conn.execute("SELECT count(*) FROM removed_clusters").fetchone()[0] == 0
+    assert tracking.get(conn, "dev", "local")["status"] == "planned"
 
 
 @pytest.mark.live

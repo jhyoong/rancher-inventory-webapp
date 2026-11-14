@@ -278,9 +278,13 @@ def _remove_unlisted(conn: sqlite3.Connection, site: str, listed: set[str]) -> N
 
     Daily cluster_metrics history and run_clusters history are kept.
     """
-    known = [r[0] for r in conn.execute("SELECT cluster_id FROM clusters WHERE site=?", (site,))]
+    known = {r[0]: r[1] for r in conn.execute("SELECT cluster_id, name FROM clusters WHERE site=?", (site,))}
     for cid in sorted(set(known) - listed):
         with transaction(conn):
+            conn.execute(
+                "INSERT OR REPLACE INTO removed_clusters (site, cluster_id, name, removed_at) VALUES (?, ?, ?, ?)",
+                (site, cid, known[cid] or cid, _now()),
+            )
             for table in (
                 "resources", "namespace_profile", "cluster_profile", "cluster_metrics_latest", "clusters",
                 "api_versions", "optional_results", "machine_pools",
