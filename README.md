@@ -403,12 +403,12 @@ Upgrade: load the new image tar, stop and remove the container, and start it aga
 
 The pages are built for planning a move from VMware and NSX to Nutanix NKP.
 
-- **Overview (`/`)**: a site picker, fleet totals, charts, a list of clusters that switches between Table and Cards, and a "Removed from Rancher" table. The summary charts stay the same size as the fleet grows: capacity, clusters by class, clusters per flag, the 10 largest clusters (switch between vCPU and memory), clusters per site by class, floating IP needs by source, node operating system images, and persistent volumes by storage class.
+- **Overview (`/`)**: a site picker, fleet totals, charts, a list of clusters that switches between Table and Cards, and a "Removed from Rancher" table. The summary charts show totals, not one bar per cluster, so they stay readable as the fleet grows: capacity, clusters by class, clusters per flag, the 10 largest clusters (switch between vCPU and memory), clusters per site by class, floating IP needs by source, node operating system images, and persistent volumes by storage class.
 - **Remaining / All clusters**: a toggle on the overview. "Remaining" is the default and counts only clusters with status not started, planned or in progress. "All" counts every cluster.
-- **Migration progress charts** (on the overview): clusters per status, status per site, status per wave, and clusters finished over time.
+- **Migration progress charts** (on the overview): clusters per status, status per site, status per wave, and clusters finished over time (only clusters marked migrated or decommissioned count as finished).
 - **Migration tracking**: each cluster has a status (not started, planned, in progress, migrated, decommissioned, won't migrate), a wave and a note. Edit them on the cluster page, where the change history is also shown. Both roles, admin and viewer, can edit them. The collector does not change them.
 - **Bulk edit**: on the cluster lists, tick clusters and set a status or a wave, or clear the wave, for all of them at once. Notes are not changed in bulk.
-- **Removed from Rancher**: clusters that the collector no longer sees in Rancher. A row is highlighted when the cluster is not marked migrated or decommissioned. Status, wave and note can be edited here too.
+- **Removed from Rancher**: clusters that the collector no longer sees in Rancher. A row is highlighted when the cluster is not marked migrated, decommissioned or won't migrate. Status, wave and note can be edited here too.
 - **Clusters (`/clusters`)**: the same Table and Cards views, with filters for flags, labels (cluster, node and machine pool labels), status and wave. The CSV export has status and wave columns.
 - **Cluster page (`/clusters/<site>/<cluster>`)**: a migration sheet with nodes grouped by machine pool, CNI, CIDRs, databases found, and the Watch out flags for that cluster.
 - **Watch out flags** mark things that need a decision before a move, for example `node-pinned-pv`, `database`, `external-ip`, `nodeport`, `host-network`, `k8s<1.32` and `privileged/hostpath`. Each flag links to the cluster page section with the rows behind it.
