@@ -35,6 +35,14 @@ def _dt(value: datetime | str | None) -> str:
     return value.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 
+def _day(value: str | None) -> str:
+    """The date part of an ISO timestamp, or "not available"."""
+    try:
+        return datetime.fromisoformat(value).date().isoformat()
+    except (TypeError, ValueError):
+        return "not available"
+
+
 def _cores(m: int | None) -> str:
     return "-" if m is None else f"{m / 1000:.1f}"
 
@@ -57,7 +65,7 @@ def _size(b: int | None) -> str:
         value /= 1024
 
 
-templates.env.filters.update(dt=_dt, cores=_cores, gib=_gib, secs=_secs, size=_size)
+templates.env.filters.update(dt=_dt, day=_day, cores=_cores, gib=_gib, secs=_secs, size=_size)
 templates.env.globals["flag_anchors"] = FLAG_ANCHORS
 templates.env.globals.update(statuses=tracking.STATUSES, wave_max=tracking.WAVE_MAX, note_max=tracking.NOTE_MAX)
 templates.env.globals["csv_url"] = lambda request, table: str(

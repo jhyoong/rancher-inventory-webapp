@@ -38,7 +38,10 @@ var VizPalette = {
     });
     if (!labels.length || !any) return none(id, name);
     var hrefs = opts.hrefs || [];
-    function hrefOf(el) { return opts.setHrefs ? opts.setHrefs[el.datasetIndex] : hrefs[el.index]; }
+    function hrefOf(el) {
+      if (opts.cellHref) return opts.cellHref(sets[el.datasetIndex].label, opts.rows[el.index]);
+      return opts.setHrefs ? opts.setHrefs[el.datasetIndex] : hrefs[el.index];
+    }
     var canvas = document.getElementById(id);
     var chart = new Chart(canvas, {
       type: "bar",
@@ -87,11 +90,19 @@ var VizPalette = {
           return { label: s.status + " " + s.count + " (" + s.pct + "%)", color: STATUS_COLOR[s.status], data: [s.count] };
         }),
         { stacked: true, legend: true, unit: "clusters", setHrefs: pr.by_status.map(function (s) { return s.href; }) });
+  var picked = new URLSearchParams(window.location.search).get("site") || "";
+  var siteQ = picked ? "&site=" + encodeURIComponent(picked) : "";
+  // Each segment links to the cluster list for its status and site (or wave). "no wave" has no wave filter, so no link.
   function byStatus(id, name, rows, key) {
     hbars(id, name, rows.map(function (r) { return r[key]; }),
           statuses.map(function (st) {
             return { label: st, color: STATUS_COLOR[st], data: rows.map(function (r) { return r.counts[st]; }) };
-          }), { stacked: true, legend: true, unit: "clusters" });
+          }), { stacked: true, legend: true, unit: "clusters",
+                cellHref: function (st, row) {
+                  var base = "/clusters?status=" + encodeURIComponent(st);
+                  if (key === "site") return base + "&site=" + encodeURIComponent(row.site);
+                  return row.wave === "no wave" ? null : base + "&wave=" + encodeURIComponent(row.wave) + siteQ;
+                }, rows: rows });
   }
   byStatus("progress-site-chart", "Migration status by site", pr.by_site, "site");
   byStatus("progress-wave-chart", "Migration status by wave", pr.by_wave, "wave");

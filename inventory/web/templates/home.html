@@ -6,6 +6,7 @@
 {{ site_refresh(site_names) }}
 <form method="get" action="/">
   <input type="hidden" name="view" value="{{ view }}">
+  {% if scope == "all" %}<input type="hidden" name="scope" value="all">{% endif %}
   <label>Site <select name="site" onchange="this.form.submit()"><option value="">all sites</option>
     {% for s in site_names %}<option {% if site == s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></label>
   <noscript><button type="submit">Show</button></noscript>
@@ -66,7 +67,7 @@
     <td><input type="checkbox" name="cluster" value="{{ r.site }}/{{ r.cluster_id }}" aria-label="Select {{ r.name or r.cluster_id }}"></td>
     <td>{{ r.site }}</td>
     <td><a href="/clusters/{{ r.site }}/{{ r.cluster_id }}">{{ r.name or r.cluster_id }}</a></td>
-    <td>{{ r.removed_day }}</td>
+    <td>{{ r.removed_at | day }}</td>
     <td>{{ r.status }}{% if not r.done %} (not marked done){% endif %}</td>
     <td>{{ r.wave or "none" }}</td>
     <td>{{ r.note or "none" }}</td>

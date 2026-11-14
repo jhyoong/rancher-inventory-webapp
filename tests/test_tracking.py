@@ -292,3 +292,23 @@ def test_scope_links(tracked_client):
     assert 'aria-current="page">All clusters' in html
     assert "scope=remaining&amp;site=dev" in html or "site=dev&amp;scope=remaining" in html
     assert 'aria-current="page">Remaining clusters' in tracked_client.get("/?scope=bogus").text
+
+
+@pytest.mark.live
+def test_site_picker_and_removed_form_keep_scope(tracked_client, tracked_conn):
+    tracked_conn.execute("INSERT INTO removed_clusters VALUES ('dev', 'c-gone', 'gone', '2026-11-10T00:00:00+00:00')")
+    tracked_conn.commit()
+    html = tracked_client.get("/?scope=all&site=dev").text
+    assert '<input type="hidden" name="scope" value="all">' in html
+    assert 'value="/?site=dev&amp;scope=all#removed"' in html.split('id="removed"')[1]
+    plain = tracked_client.get("/").text
+    assert 'name="scope"' not in plain
+    assert 'value="/#removed"' in plain.split('id="removed"')[1]
+
+
+@pytest.mark.live
+def test_removed_date_same_on_both_pages(tracked_client, tracked_conn):
+    tracked_conn.execute("INSERT INTO removed_clusters VALUES ('dev', 'c-gone', 'gone', '2026-11-10T23:30:00+00:00')")
+    tracked_conn.commit()
+    assert "<td>2026-11-10</td>" in tracked_client.get("/").text
+    assert "Removed from Rancher on 2026-11-10." in tracked_client.get("/clusters/dev/c-gone").text

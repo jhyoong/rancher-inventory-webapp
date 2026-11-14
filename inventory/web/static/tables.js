@@ -68,7 +68,19 @@
       groups(table).forEach(function (g) {
         g.row.hidden = q !== "" && g.row.textContent.toLowerCase().indexOf(q) === -1;
         g.extras.forEach(function (e) { e.hidden = g.row.hidden; });
+        // a hidden row must not be submitted by a bulk edit
+        if (g.row.hidden) {
+          Array.prototype.forEach.call(g.row.querySelectorAll("input[name=cluster]"), function (c) { c.checked = false; });
+        }
       });
+      var all = table.querySelector("input[data-select-all]");
+      if (all) {
+        all.checked = groups(table).some(function (g) { return !g.row.hidden && g.row.querySelector("input[name=cluster]"); }) &&
+          groups(table).every(function (g) {
+            var c = g.row.querySelector("input[name=cluster]");
+            return g.row.hidden || !c || c.checked;
+          });
+      }
     });
     // the table can sit inside a form (bulk edit): Enter in the filter must not submit it
     input.addEventListener("keydown", function (e) {

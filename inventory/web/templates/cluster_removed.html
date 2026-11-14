@@ -8,7 +8,7 @@
   <tr><th>Site</th><td>{{ c.site }}</td></tr>
   <tr><th>Cluster id</th><td>{{ c.cluster_id }}</td></tr>
 </table>
-<p>Removed from Rancher on {{ (c.removed_at | dt)[:10] }}. The inventory no longer holds its data; only the migration tracking is kept.</p>
+<p>Removed from Rancher on {{ c.removed_at | day }}. The inventory no longer holds its data; only the migration tracking is kept.</p>
 
 {{ migration_form(c.site, c.cluster_id, tracked, history) }}
 {% endblock %}
