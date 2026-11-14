@@ -33,6 +33,23 @@ def test_hash_matches_script(salt, type_, value):
     assert hash_name(salt, type_, value) == _script_hash(salt, type_, value)
 
 
+def _cluster_dirs(d: Path) -> list[Path]:
+    """One folder per exported cluster."""
+    return [p for p in d.iterdir() if p.is_dir()]
+
+
+def _local_dir(d: Path, s) -> Path:
+    """The bundle folder of the dev `local` cluster, found by its hashed id."""
+    from inventory.db.connection import connect
+
+    conn = connect(s.db_path, readonly=True)
+    try:
+        prof = conn.execute("SELECT cluster_uid FROM cluster_profile WHERE cluster_id='local'").fetchone()
+    finally:
+        conn.close()
+    return d / hash_name(s.export_salt, "cluster", (prof and prof["cluster_uid"]) or "local")
+
+
 def _extract(path: Path, dest: Path) -> Path:
     with tarfile.open(path) as tf:
         tf.extractall(dest, filter="data")
@@ -67,28 +84,30 @@ def test_bundle_layout(bundle):
     path, d, _, _ = bundle
     assert path.name.endswith(".tar.gz")
     assert (d / "fleet_summary.csv").is_file()
-    [cdir] = [p for p in d.iterdir() if p.is_dir()]
-    assert re.fullmatch(r"cluster-[0-9a-f]{10}", cdir.name)
-    for base in ANON_SPEC:
-        assert (cdir / f"{base}.csv").is_file(), base
-    assert (cdir / "README.txt").is_file()
+    cdirs = _cluster_dirs(d)
+    assert cdirs
+    for cdir in cdirs:
+        assert re.fullmatch(r"cluster-[0-9a-f]{10}", cdir.name)
+        for base in ANON_SPEC:
+            assert (cdir / f"{base}.csv").is_file(), base
+        assert (cdir / "README.txt").is_file()
 
 
 def test_headers_are_the_scripts(bundle):
     """Header rows equal the column lists in reference/k8s-discovery.sh."""
     _, d, _, _ = bundle
-    [cdir] = [p for p in d.iterdir() if p.is_dir()]
     script = SCRIPT.read_text()
-    for f in sorted(cdir.glob("*.csv")):
-        header = next(csv.reader(f.open()))
-        assert "\\t".join(header) in script, f.name
+    for cdir in _cluster_dirs(d):
+        for f in sorted(cdir.glob("*.csv")):
+            header = next(csv.reader(f.open()))
+            assert "\\t".join(header) in script, f.name
 
 
 def test_headers_equal_script_output(bundle):
     if not SCRIPT_OUT.is_dir():
         pytest.skip(f"no k8s-discovery.sh output in {SCRIPT_OUT}")
-    _, d, _, _ = bundle
-    [cdir] = [p for p in d.iterdir() if p.is_dir()]
+    _, d, _, s = bundle
+    cdir = _local_dir(d, s)
     [ref] = [p for p in SCRIPT_OUT.iterdir() if p.is_dir()]
     for f in ref.glob("*.csv"):
         if f.name.startswith(("tanzu", "vm_")):
@@ -97,19 +116,23 @@ def test_headers_equal_script_output(bundle):
         assert next(csv.reader(f.open())) == next(csv.reader((cdir / f.name).open())), f.name
 
 
-def test_summary_row(bundle, collected_db):
-    _, d, _, _ = bundle
+def test_summary_row(bundle, collected_db, open_db):
+    _, d, _, s = bundle
     rows = list(csv.DictReader((d / "fleet_summary.csv").open()))
-    assert len(rows) == 1
-    r = rows[0]
-    assert r["cluster_id"].startswith("cluster-") and r["context"].startswith("ctx-")
-    assert int(r["nodes"]) >= 1 and int(r["namespaces_total"]) > 10
-    assert "stateful" in r["complexity_flags"].split(";")
+    exported = open_db(collected_db.db_path, readonly=True).execute(
+        "SELECT count(*) FROM clusters WHERE last_ok_run IS NOT NULL").fetchone()[0]
+    assert len(rows) == exported == len(_cluster_dirs(d))
+    for r in rows:
+        assert r["cluster_id"].startswith("cluster-") and r["context"].startswith("ctx-")
+        assert int(r["nodes"]) >= 1
+    local = next(r for r in rows if r["cluster_id"] == _local_dir(d, s).name)
+    assert int(local["namespaces_total"]) > 10
+    assert "stateful" in local["complexity_flags"].split(";")
 
 
 def test_system_namespaces_readable_user_hashed(bundle):
-    _, d, _, _ = bundle
-    [cdir] = [p for p in d.iterdir() if p.is_dir()]
+    _, d, _, s = bundle
+    cdir = _local_dir(d, s)
     ns = [r["namespace"] for r in csv.DictReader((cdir / "namespaces.csv").open())]
     assert "kube-system" in ns and "cattle-system" in ns
     assert any(n.startswith("ns-") for n in ns)  # kagent and other user namespaces
@@ -128,11 +151,16 @@ def test_strict_hashes_images_and_charts(collected_db, tmp_path, open_db):
     s = collected_db.model_copy(update={"export_salt": "test-salt", "export_sensitive_strings": ""})
     path = build_export(open_db(s.db_path), s, ExportOptions(Scope(), strict=True), tmp_path)
     d = _extract(path, tmp_path / "x")
-    [cdir] = [p for p in d.iterdir() if p.is_dir()]
+    cdir = _local_dir(d, s)
     charts = [r["chart"] for r in csv.DictReader((cdir / "helm_releases.csv").open())]
     assert charts and all(c.startswith("chart-") for c in charts)
     repos = [r["repository"] for r in csv.DictReader((cdir / "images.csv").open())]
     assert repos and all(x.startswith("img-") for x in repos)
+    for other in _cluster_dirs(d):  # every cluster's helm charts and image repositories are hashed
+        for r in csv.DictReader((other / "helm_releases.csv").open()):
+            assert r["chart"].startswith("chart-")
+        for r in csv.DictReader((other / "images.csv").open()):
+            assert r["repository"].startswith("img-")
 
 
 def test_planted_ip_blocks(tmp_path):

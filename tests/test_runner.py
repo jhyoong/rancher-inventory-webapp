@@ -66,14 +66,15 @@ def test_next_daily_start():
 
 
 @pytest.mark.live
-def test_full_run_dev(settings, db, db_path, open_db):
+def test_full_run_dev(settings, db, db_path, open_db, dev_clusters):
     rid = create_run(open_db(db_path), "manual", "t", Scope())
     assert asyncio.run(execute_run(settings, rid)) == "ok"
-    row = open_db(db_path).execute("SELECT * FROM run_clusters WHERE run_id=?", [rid]).fetchone()
-    assert row["cluster_id"] == "local" and row["status"] == "ok"
-    assert row["kinds_done"] == row["kinds_total"]
+    rows = open_db(db_path).execute("SELECT * FROM run_clusters WHERE run_id=?", [rid]).fetchall()
+    assert {r["cluster_id"] for r in rows} == {c["id"] for c in dev_clusters} and "local" in {c["id"] for c in dev_clusters}
+    for row in rows:
+        assert row["status"] == "ok" and row["kinds_done"] == row["kinds_total"], row["cluster_id"]
     run = open_db(db_path).execute("SELECT * FROM runs WHERE id=?", [rid]).fetchone()
-    assert run["status"] == "ok" and run["clusters_total"] == 1 and run["finished_at"]
+    assert run["status"] == "ok" and run["clusters_total"] == len(dev_clusters) and run["finished_at"]
 
 
 @pytest.mark.live
@@ -192,8 +193,9 @@ def test_bad_ca_file_site_does_not_stop_other_sites(settings, db, db_path, tmp_p
     rid = create_run(open_db(db_path), "manual", "t", Scope())
     assert asyncio.run(execute_run(s, rid)) == "partial"
     conn = open_db(db_path)
-    row = conn.execute("SELECT * FROM run_clusters WHERE run_id=? AND site='dev'", [rid]).fetchone()
-    assert row["cluster_id"] == "local" and row["status"] == "ok"
+    rows = conn.execute("SELECT * FROM run_clusters WHERE run_id=? AND site='dev'", [rid]).fetchall()
+    assert rows and "local" in {r["cluster_id"] for r in rows}
+    assert all(r["status"] == "ok" for r in rows)
     run = conn.execute("SELECT * FROM runs WHERE id=?", [rid]).fetchone()
     assert "dev-badca" in run["error"]
 

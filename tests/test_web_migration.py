@@ -136,11 +136,15 @@ def test_site_overview_dev(collected_db, open_db, settings, dev_lists):
     rules = load_rules(settings)
     o = site_overview(conn, rules)
     t, charts = o["totals"], o["charts"]
-    assert t["nodes"] == len(dev_lists["nodes"])
+    # dev_lists is the live data of `local`; totals cover every cluster in the DB
+    assert t["nodes"] == conn.execute("SELECT count(*) FROM resources WHERE kind='nodes'").fetchone()[0]
+    assert conn.execute(
+        "SELECT count(*) FROM resources WHERE kind='nodes' AND cluster_id='local'").fetchone()[0] == len(dev_lists["nodes"])
     assert t["pv_count"] == len(dev_lists["persistentvolumes"])
     assert sum(x["nodes"] for x in charts["os_images"]) == t["nodes"]
     assert sum(x["pv_count"] for x in charts["pv_by_class"]) == t["pv_count"]
-    assert t["floating_ips"] == floating_ips(conn, rules)[("dev", "local")]["total"]
+    assert t["floating_ips"] == sum(f["total"] for f in floating_ips(conn, rules).values())
+    assert floating_ips(conn, rules)[("dev", "local")]["total"] >= 1
     cap = charts["capacity"]
     assert cap["clusters"] == len(o["clusters"])
     assert cap["cpu"]["alloc"] == t["cpu_alloc_m"]

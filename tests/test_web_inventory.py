@@ -67,7 +67,12 @@ def test_helm_page_lists_rancher_chart(admin_client_collected):
 def test_helm_matches_catalog(collected_db, dev_lists, open_db):
     conn = open_db(collected_db.db_path, readonly=True)
     try:
-        assert sum(c["releases"] for c in queries.helm_charts(conn)) == len(dev_lists["helmreleases"])
+        # dev_lists is the live catalog of `local`; helm_charts counts every cluster in the DB
+        total = sum(c["releases"] for c in queries.helm_charts(conn))
+        assert total == conn.execute("SELECT count(*) FROM resources WHERE kind='helmreleases'").fetchone()[0]
+        local = conn.execute(
+            "SELECT count(*) FROM resources WHERE kind='helmreleases' AND cluster_id='local'").fetchone()[0]
+        assert local == len(dev_lists["helmreleases"]) and total >= local
     finally:
         conn.close()
 
@@ -141,7 +146,7 @@ def test_network_lists_are_capped(admin_client_collected, monkeypatch, open_db):
     """Each /network list stops at NETWORK_LIMIT rows and says so."""
     conn = open_db(admin_client_collected.app.state.settings.db_path, readonly=True)
     try:
-        assert len(queries.node_ips(conn)) == 3
+        assert len([r for r in queries.node_ips(conn) if r["cluster_id"] == "local"]) == 3
         assert len(queries.node_ips(conn, limit=1)) == 1
         assert len(queries.search_addresses(conn, "1", limit=2)) == 2
     finally:
@@ -189,7 +194,7 @@ def test_bad_label_json_is_empty(collected_db, tmp_path, open_db):
     shutil.copy(collected_db.db_path, tmp_path / "inventory.db")
     conn = open_db(tmp_path / "inventory.db")
     try:
-        conn.execute("UPDATE clusters SET labels='{not json' WHERE cluster_id='local'")
+        conn.execute("UPDATE clusters SET labels='{not json'")  # every cluster, so none keeps real labels
         assert queries.inventory_rows(conn, label="provider.cattle.io") == []
     finally:
         conn.close()

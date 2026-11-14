@@ -23,22 +23,25 @@ def _run(conn, filters):
     return run_readonly_query(conn, sql, params)
 
 
-@pytest.mark.parametrize("f", [
-    {"service_type": "NodePort"},          # dev has no LoadBalancer service
-    {"address": "192.168.50."},
-    {"address": "192.168.50.210"},
-    {"helm_chart": "cert-manager"},
-    {"helm_chart": "cert-manager@v1.20.2"},
-    {"class": "stateful-helm-crd"},
-    {"flag": "operators"},
-    {"flag": "stateful"},
-    {"annotation": "meta.helm.sh/release-name"},
-    {"annotation": "meta.helm.sh/release-namespace=cert-manager"},
-    {"crd_group": "cert-manager.io"},
+@pytest.mark.parametrize("f,only_local", [
+    ({"service_type": "NodePort"}, True),          # dev has no LoadBalancer service
+    ({"address": "192.168.50."}, True),
+    ({"address": "192.168.50.210"}, True),
+    ({"helm_chart": "cert-manager"}, True),
+    ({"helm_chart": "cert-manager@v1.20.2"}, True),
+    ({"class": "stateful-helm-crd"}, True),
+    ({"flag": "operators"}, True),
+    ({"flag": "stateful"}, True),
+    ({"annotation": "meta.helm.sh/release-name"}, False),  # any Helm-managed cluster has it
+    ({"annotation": "meta.helm.sh/release-namespace=cert-manager"}, True),
+    ({"crd_group": "cert-manager.io"}, True),
 ])
-def test_new_filters_find_local(ro, f):
+def test_new_filters_find_local(ro, f, only_local):
     rows = _run(ro, f)
-    assert rows and {r["cluster_id"] for r in rows} == {"local"}, f
+    ids = {r["cluster_id"] for r in rows}
+    assert rows and "local" in ids, f
+    if only_local:
+        assert ids == {"local"}, f
 
 
 @pytest.mark.parametrize("f", [

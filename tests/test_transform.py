@@ -77,7 +77,7 @@ def test_counts_match_rancher(collected_db, dev_lists, open_db):
 
     conn = open_db(collected_db.db_path)
     for kind, items in dev_lists.items():
-        n = conn.execute("SELECT count(*) FROM resources WHERE kind=?", [kind]).fetchone()[0]
+        n = conn.execute("SELECT count(*) FROM resources WHERE kind=? AND cluster_id='local'", [kind]).fetchone()[0]
         assert n == len([o for o in items if not skip_object(kind, o)]), kind
 
 

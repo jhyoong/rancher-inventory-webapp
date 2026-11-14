@@ -160,6 +160,6 @@ def test_local_profile(collected_db, rules, dev_lists, open_db, tmp_path):
         # a second build replaces rows instead of duplicating them
         build_profiles(conn, "dev", "local", 1, rules)
         assert snapshot() == first
-        assert conn.execute("SELECT count(*) FROM cluster_profile").fetchone()[0] == 1
+        assert conn.execute("SELECT count(*) FROM cluster_profile WHERE cluster_id='local'").fetchone()[0] == 1
     finally:
         conn.close()
