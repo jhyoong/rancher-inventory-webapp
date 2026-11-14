@@ -35,7 +35,7 @@ def test_upgrade_v1_to_v2_keeps_data(tmp_path, collected_db, open_db):
     metrics = conn.execute("SELECT count(*) FROM cluster_metrics").fetchone()[0]
     assert metrics >= 1
 
-    assert migrate(conn) == SCHEMA_VERSION == 3
+    assert migrate(conn) == SCHEMA_VERSION == 4
     assert [u.username for u in list_users(conn)] == ["keep"]
     assert conn.execute("SELECT count(*) FROM presets").fetchone()[0] == 1
     assert conn.execute("SELECT count(*) FROM cluster_metrics").fetchone()[0] == metrics
@@ -67,10 +67,12 @@ def test_upgrade_v2_to_v3_keeps_data(tmp_path, collected_db, open_db):
     metrics = conn.execute("SELECT count(*) FROM cluster_metrics").fetchone()[0]
     assert metrics >= 1
 
-    assert migrate(conn) == SCHEMA_VERSION == 3
+    assert migrate(conn) == SCHEMA_VERSION == 4
     assert [u.username for u in list_users(conn)] == ["keep"]
     assert conn.execute("SELECT count(*) FROM presets").fetchone()[0] == 1
     assert conn.execute("SELECT count(*) FROM cluster_metrics").fetchone()[0] == metrics
     cluster_cols = {r[1] for r in conn.execute("PRAGMA table_info(clusters)")}
     assert {"api_endpoint", "pools_status", "prov_name"} <= cluster_cols
     assert conn.execute("SELECT count(*) FROM machine_pools").fetchone()[0] == 0
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert {"migration_tracking", "migration_tracking_log", "removed_clusters"} <= tables
