@@ -140,7 +140,10 @@ def test_site_overview_dev(collected_db, open_db, settings, dev_lists):
     assert t["nodes"] == conn.execute("SELECT count(*) FROM resources WHERE kind='nodes'").fetchone()[0]
     assert conn.execute(
         "SELECT count(*) FROM resources WHERE kind='nodes' AND cluster_id='local'").fetchone()[0] == len(dev_lists["nodes"])
-    assert t["pv_count"] == len(dev_lists["persistentvolumes"])
+    assert t["pv_count"] == conn.execute("SELECT count(*) FROM resources WHERE kind='persistentvolumes'").fetchone()[0]
+    assert conn.execute(
+        "SELECT count(*) FROM resources WHERE kind='persistentvolumes' AND cluster_id='local'"
+    ).fetchone()[0] == len(dev_lists["persistentvolumes"])
     assert sum(x["nodes"] for x in charts["os_images"]) == t["nodes"]
     assert sum(x["pv_count"] for x in charts["pv_by_class"]) == t["pv_count"]
     assert t["floating_ips"] == sum(f["total"] for f in floating_ips(conn, rules).values())

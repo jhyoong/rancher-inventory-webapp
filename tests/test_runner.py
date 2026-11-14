@@ -177,7 +177,7 @@ def test_cancelled_task_ends_interrupted(settings, db, db_path, open_db):
 
 
 @pytest.mark.live
-def test_bad_ca_file_site_does_not_stop_other_sites(settings, db, db_path, tmp_path, monkeypatch, open_db):
+def test_bad_ca_file_site_does_not_stop_other_sites(settings, db, db_path, tmp_path, monkeypatch, open_db, dev_clusters):
     """A site whose CA file is missing is a site error; the other sites still collect."""
     import os
 
@@ -194,7 +194,7 @@ def test_bad_ca_file_site_does_not_stop_other_sites(settings, db, db_path, tmp_p
     assert asyncio.run(execute_run(s, rid)) == "partial"
     conn = open_db(db_path)
     rows = conn.execute("SELECT * FROM run_clusters WHERE run_id=? AND site='dev'", [rid]).fetchall()
-    assert rows and "local" in {r["cluster_id"] for r in rows}
+    assert {r["cluster_id"] for r in rows} == {c["id"] for c in dev_clusters}
     assert all(r["status"] == "ok" for r in rows)
     run = conn.execute("SELECT * FROM runs WHERE id=?", [rid]).fetchone()
     assert "dev-badca" in run["error"]

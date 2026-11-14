@@ -97,8 +97,12 @@ def test_headers_are_the_scripts(bundle):
     """Header rows equal the column lists in reference/k8s-discovery.sh."""
     _, d, _, _ = bundle
     script = SCRIPT.read_text()
-    for cdir in _cluster_dirs(d):
-        for f in sorted(cdir.glob("*.csv")):
+    cdirs = _cluster_dirs(d)
+    assert cdirs
+    for cdir in cdirs:
+        files = sorted(cdir.glob("*.csv"))
+        assert files, cdir.name
+        for f in files:
             header = next(csv.reader(f.open()))
             assert "\\t".join(header) in script, f.name
 
