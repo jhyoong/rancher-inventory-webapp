@@ -141,8 +141,46 @@ def test_site_overview_dev(collected_db, open_db, settings, dev_lists):
     assert sum(x["nodes"] for x in charts["os_images"]) == t["nodes"]
     assert sum(x["pv_count"] for x in charts["pv_by_class"]) == t["pv_count"]
     assert t["floating_ips"] == floating_ips(conn, rules)[("dev", "local")]["total"]
-    assert [c["cluster"] for c in charts["floating"]] == [r["name"] for r in o["clusters"]]
+    cap = charts["capacity"]
+    assert cap["clusters"] == len(o["clusters"])
+    assert cap["cpu"]["alloc"] == t["cpu_alloc_m"]
+    assert cap["cpu"]["alloc_n"] == sum(1 for r in o["clusters"] if r["cpu_alloc_m"] is not None)
+    assert sum(c["count"] for c in charts["by_class"]) == len(o["clusters"])
+    assert all(c["count"] > 0 for c in charts["by_class"] + charts["by_flag"])
+    counts = [c["count"] for c in charts["by_flag"]]
+    assert counts == sorted(counts, reverse=True)
+    assert all(f["href"].startswith("/clusters?flag=") for f in charts["by_flag"])
+    assert len(charts["top_cpu"]) <= 10
+    biggest = min((r for r in o["clusters"] if r["cpu_req_m"] is not None), key=lambda r: (-r["cpu_req_m"], r["name"]))
+    assert charts["top_cpu"][0]["href"] == f"/clusters/{biggest['site']}/{biggest['cluster_id']}"
+    assert sum(charts["floating"].values()) == t["floating_ips"]
+    assert [s["site"] for s in charts["site_class"]] == ["dev"]
+    dev_hrefs = [c["href"] for c in site_overview(conn, rules, site="dev")["charts"]["by_class"] if c["href"]]
+    assert dev_hrefs and all(h.startswith("/clusters?cls=") and h.endswith("&site=dev") for h in dev_hrefs)
     assert site_overview(conn, rules, site="other")["totals"]["clusters"] == 0
+
+
+def _copy_local_as_gone(conn, table):
+    cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})")]
+    select = ", ".join("'c-gone'" if c == "cluster_id" else c for c in cols)
+    conn.execute(f"INSERT INTO {table} ({', '.join(cols)}) SELECT {select} FROM {table} WHERE cluster_id='local'")
+
+
+def test_site_overview_two_clusters(collected_db, tmp_path, open_db, settings):
+    shutil.copy(collected_db.db_path, tmp_path / "inventory.db")
+    conn = open_db(tmp_path / "inventory.db")
+    before = site_overview(conn, load_rules(settings))["clusters"]
+    for table in ("clusters", "cluster_profile", "cluster_metrics_latest"):
+        _copy_local_as_gone(conn, table)
+    conn.execute("UPDATE cluster_metrics_latest SET mem_req_b = NULL WHERE cluster_id='c-gone'")
+    conn.commit()
+    o = site_overview(conn, load_rules(settings))
+    ch = o["charts"]
+    assert ch["capacity"]["clusters"] == len(before) + 1
+    assert ch["capacity"]["mem"]["req_n"] == sum(1 for r in before if r["mem_req_b"] is not None)
+    assert all(t["href"] != "/clusters/dev/c-gone" for t in ch["top_mem"])
+    assert ch["top_cpu_share"] == 100.0  # at most 10 clusters, so the top 10 hold everything
+    assert sum(c["count"] for c in ch["by_class"]) == len(before) + 1
 
 
 def test_home_page(admin_client_collected):

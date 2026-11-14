@@ -3,6 +3,7 @@
 import json
 import sqlite3
 from fnmatch import fnmatchcase
+from urllib.parse import quote
 
 from inventory.collector.annotations import matches
 from inventory.collector.classify import is_system_namespace
@@ -19,6 +20,9 @@ DATABASE_KINDS = ("deployments", "statefulsets", "daemonsets", "cronjobs", "jobs
 UNIDENTIFIED = "unidentified"
 NOT_COLLECTED = "not collected"
 SEVERAL_LB = "several-lb-implementations"
+
+CLASS_ORDER = ("empty", "stateless", "stateful", "stateful-helm", "stateful-crd", "stateful-helm-crd", NOT_COLLECTED)
+TOP_N = 10
 
 
 def lb_implementation(lb_class: str | None, annotation_keys: list[str], rules: Rules) -> str:
@@ -434,6 +438,66 @@ def cluster_rows(
     return rows
 
 
+def _chart_inputs(rows: list[dict], site: str | None) -> dict:
+    """Overview chart data summarized across the given cluster rows."""
+    suffix = f"&site={quote(site)}" if site else ""
+
+    def block(prefix: str, unit: str) -> dict:
+        out = {}
+        for key in ("alloc", "req", "used"):
+            values = [r[f"{prefix}_{key}_{unit}"] for r in rows if r[f"{prefix}_{key}_{unit}"] is not None]
+            out[key], out[f"{key}_n"] = (sum(values) if values else None), len(values)
+        return out
+
+    class_counts: dict[str, int] = {}
+    site_counts: dict[str, dict[str, int]] = {}
+    for r in rows:
+        label = r["class"] or NOT_COLLECTED
+        class_counts[label] = class_counts.get(label, 0) + 1
+        per_site = site_counts.setdefault(r["site"], {})
+        per_site[label] = per_site.get(label, 0) + 1
+    by_class = [
+        {"label": label, "count": class_counts[label],
+         "href": None if label == NOT_COLLECTED else f"/clusters?cls={quote(label)}{suffix}"}
+        for label in CLASS_ORDER if class_counts.get(label)
+    ]  # fmt: skip
+
+    flag_counts = {f: sum(1 for r in rows if f in r["flags"]) for f in ALL_FLAGS}
+    by_flag = sorted(
+        ({"label": f, "count": n, "href": f"/clusters?flag={quote(f)}{suffix}"} for f, n in flag_counts.items() if n),
+        key=lambda x: (-x["count"], x["label"]),
+    )
+
+    def top(column: str) -> tuple[list[dict], float | None]:
+        have = sorted((r for r in rows if r[column] is not None), key=lambda r: (-r[column], r["name"]))
+        items = [
+            {"label": r["name"], "value": r[column], "href": f"/clusters/{r['site']}/{r['cluster_id']}"}
+            for r in have[:TOP_N]
+        ]
+        total = sum(r[column] for r in have)
+        return items, (round(100 * sum(i["value"] for i in items) / total, 1) if total else None)
+
+    top_cpu, top_cpu_share = top("cpu_req_m")
+    top_mem, top_mem_share = top("mem_req_b")
+    return {
+        "capacity": {"clusters": len(rows), "cpu": block("cpu", "m"), "mem": block("mem", "b")},
+        "by_class": by_class,
+        "by_flag": by_flag,
+        "top_cpu": top_cpu,
+        "top_mem": top_mem,
+        "top_cpu_share": top_cpu_share,
+        "top_mem_share": top_mem_share,
+        "site_class": [
+            {"site": s, "counts": {label: site_counts[s][label] for label in CLASS_ORDER if label in site_counts[s]}}
+            for s in sorted(site_counts)
+        ],
+        "floating": {
+            **{k: sum(r["floating"][k] for r in rows) for k in ("lb", "external_ip", "ingress_lb", "node_external")},
+            "control_plane": sum(1 for r in rows if r["floating"]["control_plane"]),
+        },
+    }
+
+
 def site_overview(conn: sqlite3.Connection, rules: Rules, site: str | None = None) -> dict:
     """Totals and chart data for the overview page, for one site or all sites."""
     rows = cluster_rows(conn, rules, site=site)
@@ -457,7 +521,6 @@ def site_overview(conn: sqlite3.Connection, rules: Rules, site: str | None = Non
         c = pv_by_class.setdefault(v["storage_class"], {"storage_class": v["storage_class"], "pv_count": 0, "bytes": 0})
         c["pv_count"] += 1
         c["bytes"] += _quantity(parse_bytes, v["size"]) or 0  # an unparsable size counts as unknown
-    sources = ("lb", "external_ip", "ingress_lb", "node_external")
     return {
         "totals": {
             "clusters": len(rows),
@@ -471,17 +534,8 @@ def site_overview(conn: sqlite3.Connection, rules: Rules, site: str | None = Non
         },
         "charts": {
             "os_images": os_images,
-            "capacity": [
-                {"cluster": r["name"], **{k: r[k] for k in (
-                    "cpu_alloc_m", "cpu_req_m", "cpu_used_m", "mem_alloc_b", "mem_req_b", "mem_used_b")}}
-                for r in rows
-            ],
             "pv_by_class": sorted(pv_by_class.values(), key=lambda c: (-c["pv_count"], c["storage_class"])),
-            "floating": [
-                {"cluster": r["name"], **{k: r["floating"][k] for k in sources},
-                 "control_plane": 1 if r["floating"]["control_plane"] else 0}
-                for r in rows
-            ],
+            **_chart_inputs(rows, site),
         },
         "clusters": rows,
     }  # fmt: skip
