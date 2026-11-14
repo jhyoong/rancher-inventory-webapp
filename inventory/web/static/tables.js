@@ -70,6 +70,10 @@
         g.extras.forEach(function (e) { e.hidden = g.row.hidden; });
       });
     });
+    // the table can sit inside a form (bulk edit): Enter in the filter must not submit it
+    input.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") e.preventDefault();
+    });
     table.parentNode.insertBefore(input, table);
   }
 
