@@ -81,6 +81,7 @@
     if (!headers.every(function (c) { return c.tagName === "TH"; })) return;
     table.dataset.sortable = "1";
     headers.forEach(function (th, col) {
+      if (th.classList.contains("nosort")) return;
       th.classList.add("sortable");
       th.tabIndex = 0;
       var go = function () { sortBy(table, headers, col, th); };
@@ -91,6 +92,20 @@
     });
     if (groups(table).length > 10) addFilter(table);
   }
+
+  // "Select all shown": ticks or unticks the row checkboxes of its table that the row filter does not hide.
+  document.addEventListener("change", function (e) {
+    var box = e.target;
+    if (!box.matches || !box.matches("input[data-select-all]")) return;
+    var table = box.closest("table");
+    if (!table) return;
+    groups(table).forEach(function (g) {
+      if (g.row.hidden) return;
+      Array.prototype.forEach.call(g.row.querySelectorAll("input[name=cluster]"), function (c) {
+        c.checked = box.checked;
+      });
+    });
+  });
 
   function init(root) {
     Array.prototype.forEach.call((root || document).querySelectorAll("table"), setup);

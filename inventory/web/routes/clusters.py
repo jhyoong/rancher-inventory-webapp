@@ -3,7 +3,7 @@ import sqlite3
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from inventory.collector.rules import load_rules
-from inventory.web import migration, queries
+from inventory.web import migration, queries, tracking
 from inventory.web.auth import User
 from inventory.web.deps import csv_download, current_user, get_settings, read_db, render, wants_csv
 
@@ -15,7 +15,7 @@ VIEWS = ("table", "cards")
 @router.get("/clusters")
 def clusters(request: Request, conn: sqlite3.Connection = Depends(read_db), user: User = Depends(current_user)):
     q = request.query_params
-    f = {k: q.get(k, "").strip() for k in ("site", "cls", "flag", "label")}
+    f = {k: q.get(k, "").strip() for k in ("site", "cls", "flag", "label", "status", "wave")}
     view = q.get("view") if q.get("view") in VIEWS else "table"
     rules = load_rules(get_settings(request))
     try:
@@ -46,7 +46,16 @@ def cluster(
 ):
     row = queries.cluster(conn, site, cluster_id)
     if row is None:
-        raise HTTPException(404, "cluster not found")
+        gone = conn.execute(
+            "SELECT site, cluster_id, name, removed_at FROM removed_clusters WHERE site=? AND cluster_id=?",
+            (site, cluster_id),
+        ).fetchone()
+        if gone is None:
+            raise HTTPException(404, "cluster not found")
+        return render(
+            request, conn, user, "cluster_removed.html", c=dict(gone),
+            tracked=tracking.get(conn, site, cluster_id), history=tracking.history(conn, site, cluster_id),
+        )  # fmt: skip
     metrics = queries.cluster_metrics(conn, site, cluster_id)
     rules = load_rules(get_settings(request))
     sheet = migration.cluster_sheet(conn, rules, site, cluster_id)
@@ -68,5 +77,6 @@ def cluster(
     return render(
         request, conn, user, "cluster.html", c=row, p=queries.cluster_inventory(conn, site, cluster_id),
         flags=sheet["flags"], floating=sheet["floating"], pools_status=sheet["pools_status"], groups=sheet["groups"],
+        tracked=tracking.get(conn, site, cluster_id), history=tracking.history(conn, site, cluster_id),
         **tables,
     )  # fmt: skip

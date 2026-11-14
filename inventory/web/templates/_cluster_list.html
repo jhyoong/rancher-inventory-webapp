@@ -25,6 +25,8 @@
     <h3>{{ _cluster(r) }}</h3>
     <dl>
       <dt>Site</dt><dd>{{ r.site }}</dd>
+      <dt>Status</dt><dd>{{ r.status }}</dd>
+      <dt>Wave</dt><dd>{{ r.wave or "none" }}</dd>
       <dt>Kubernetes</dt><dd>{{ r.k8s_version or "not available" }}</dd>
       <dt>Nodes</dt><dd>{{ _nodes(r) }}</dd>
       <dt>Pools</dt><dd>{{ _pools(r) }}</dd>
@@ -43,14 +45,28 @@
   {% endfor %}
 </div>
 {% else %}
+<form method="post" action="/migration/bulk" class="bulk-edit">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<input type="hidden" name="next" value="{{ request.url.path }}{% if request.url.query %}?{{ request.url.query }}{% endif %}">
+<p class="bulk-bar">
+  <label>Status <select name="status"><option value="">no change</option>
+    {% for s in statuses %}<option>{{ s }}</option>{% endfor %}</select></label>
+  <label>Wave <input name="wave" maxlength="{{ wave_max }}" placeholder="no change"></label>
+  <label><input type="checkbox" name="clear_wave" value="1"> Clear wave</label>
+  <button type="submit">Apply to selected</button>
+</p>
 <table>
-  <tr><th>Site</th><th>Cluster</th><th>Kubernetes</th><th>Nodes</th><th>Pools</th><th>OS</th>
+  <tr><th class="nosort"><input type="checkbox" data-select-all aria-label="Select all shown"></th>
+      <th>Site</th><th>Cluster</th><th>Status</th><th>Wave</th><th>Kubernetes</th><th>Nodes</th><th>Pools</th><th>OS</th>
       <th>vCPU alloc / req / used</th><th>Memory GiB alloc / req / used</th><th>PVs</th><th>Floating IPs</th>
       <th>LB</th><th>Watch out</th>{% if matched %}<th>Matched</th>{% endif %}</tr>
   {% for r in rows %}
   <tr>
+    <td><input type="checkbox" name="cluster" value="{{ r.site }}/{{ r.cluster_id }}" aria-label="Select {{ r.name }}"></td>
     <td>{{ r.site }}</td>
     <td>{{ _cluster(r) }}</td>
+    <td>{{ r.status }}</td>
+    <td>{{ r.wave or "none" }}</td>
     <td>{{ r.k8s_version or "not available" }}</td>
     <td class="r">{{ _nodes(r) }}</td>
     <td class="r">{{ _pools(r) }}</td>
@@ -64,8 +80,9 @@
     {% if matched %}<td>{{ r.label_hits | join(", ") }}</td>{% endif %}
   </tr>
   {% else %}
-  <tr><td colspan="12">No clusters match.</td></tr>
+  <tr><td colspan="15">No clusters match.</td></tr>
   {% endfor %}
 </table>
+</form>
 {% endif %}
 {% endmacro %}

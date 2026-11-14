@@ -1,3 +1,5 @@
+import csv
+import io
 import shutil
 from datetime import date, datetime, timezone
 import pytest
@@ -99,3 +101,137 @@ def test_over_time_drops_when_status_moves_back(tracked_conn):
     p = tracking.progress(tracked_conn, today=date(2026, 11, 2))
     assert p["over_time"] == [{"day": "2026-11-01", "done": 1}, {"day": "2026-11-02", "done": 0}]
     assert tracking.progress(tracked_conn, site="nope", today=date(2026, 11, 2))["over_time"] == []
+
+
+# ---- web: edit tracking ----
+
+@pytest.fixture
+def tracked_client(tracked_settings):
+    from fastapi.testclient import TestClient
+
+    from tests.conftest import TEST_PASSWORD, _login
+    from inventory.web.app import create_app
+
+    with TestClient(create_app(tracked_settings, None)) as c:
+        yield _login(c, tracked_settings, "admin", TEST_PASSWORD)
+
+
+@pytest.fixture
+def tracked_viewer(tracked_settings):
+    from fastapi.testclient import TestClient
+
+    from tests.conftest import _login
+    from inventory.db.connection import connect
+    from inventory.web.app import create_app
+    from inventory.web.auth import create_user
+
+    with TestClient(create_app(tracked_settings, None)) as c:
+        conn = connect(tracked_settings.db_path)
+        try:
+            create_user(conn, "viewer", "viewer-password-1", "viewer")
+        finally:
+            conn.close()
+        yield _login(c, tracked_settings, "viewer", "viewer-password-1")
+
+
+def _csv_rows(client, query=""):
+    text = client.get(f"/clusters?format=csv&table=clusters{query}").text
+    return list(csv.DictReader(io.StringIO(text)))
+
+
+def _local(rows):
+    return next(r for r in rows if r["cluster_id"] == "local")
+
+
+@pytest.mark.live
+def test_cluster_page_saves_tracking(tracked_client):
+    r = tracked_client.post("/clusters/dev/local/migration", data={"status": "planned", "wave": "wave 1", "note": "to nkp-a", "csrf": tracked_client.csrf}, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"].endswith("#migration")
+    html = tracked_client.get("/clusters/dev/local").text
+    assert 'id="migration"' in html and "to nkp-a" in html and "wave 1" in html
+    assert "Last changed by admin" in html
+
+
+@pytest.mark.live
+def test_cluster_page_tracking_errors(tracked_client):
+    data = {"csrf": tracked_client.csrf}
+    assert tracked_client.post("/clusters/dev/c-never/migration", data={**data, "status": "planned"}).status_code == 404
+    assert tracked_client.post("/clusters/dev/local/migration", data={**data, "status": "done"}).status_code == 400
+    assert tracked_client.post("/clusters/dev/local/migration", data={**data, "wave": "x" * 101}).status_code == 400
+    assert tracked_client.post("/clusters/dev/local/migration", data={"status": "planned"}).status_code == 403
+    assert "Not changed yet" in tracked_client.get("/clusters/dev/local").text
+
+
+@pytest.mark.live
+def test_viewer_can_edit_tracking(tracked_viewer):
+    r = tracked_viewer.post("/clusters/dev/local/migration", data={"status": "planned", "csrf": tracked_viewer.csrf}, follow_redirects=False)
+    assert r.status_code == 303
+    assert _local(_csv_rows(tracked_viewer))["status"] == "planned"
+
+
+@pytest.mark.live
+def test_bulk_rejects_empty_and_bad_status(tracked_client, tracked_conn):
+    base = {"csrf": tracked_client.csrf, "next": "/clusters"}
+    assert tracked_client.post("/migration/bulk", data={**base, "status": "planned"}).status_code == 400
+    assert tracked_client.post("/migration/bulk", data={**base, "cluster": "dev/local", "status": "done"}).status_code == 400
+    assert tracked_client.post("/migration/bulk", data={**base, "cluster": "dev/local"}).status_code == 400
+    assert tracked_client.post("/migration/bulk", data={**base, "cluster": ["dev/local", "dev/nope"], "status": "planned"}).status_code == 400
+    assert tracked_client.post("/migration/bulk", data={**base, "cluster": "dev/local", "wave": "w", "clear_wave": "1"}).status_code == 400
+    assert tracked_client.post("/migration/bulk", data={**base, "cluster": "dev/local", "wave": "x" * 101}).status_code == 400
+    assert tracked_client.post("/migration/bulk", data={**base, "cluster": "nosite", "status": "planned"}).status_code == 400
+    rows = _csv_rows(tracked_client)
+    assert rows and "status" in rows[0]
+    assert all(r["status"] == "not started" for r in rows)
+    assert tracking.current(tracked_conn) == {}
+
+
+@pytest.mark.live
+def test_bulk_next_must_be_local(tracked_client):
+    data = {"csrf": tracked_client.csrf, "cluster": "dev/local", "status": "planned"}
+    for bad in ("//evil.example", "http://evil.example/", "/\\evil.example", ""):
+        r = tracked_client.post("/migration/bulk", data={**data, "next": bad}, follow_redirects=False)
+        assert r.status_code == 303 and r.headers["location"] == "/"
+
+
+@pytest.mark.live
+def test_bulk_sets_status_and_clears_wave(tracked_client):
+    tracked_client.post("/clusters/dev/local/migration", data={"status": "planned", "wave": "wave 1", "note": "n", "csrf": tracked_client.csrf})
+    r = tracked_client.post("/migration/bulk", data={"csrf": tracked_client.csrf, "cluster": "dev/local", "status": "in progress", "clear_wave": "1", "next": "/clusters?status=in%20progress"}, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/clusters?status=in%20progress"
+    row = _local(_csv_rows(tracked_client))
+    assert (row["status"], row["wave"], row["note"]) == ("in progress", "", "n")
+
+
+@pytest.mark.live
+def test_bulk_sets_wave_on_all(tracked_client, tracked_conn):
+    ids = [r["cluster_id"] for r in tracked_conn.execute("SELECT cluster_id FROM clusters WHERE site='dev'")]
+    r = tracked_client.post("/migration/bulk", data={"csrf": tracked_client.csrf, "cluster": [f"dev/{i}" for i in ids], "wave": "wave 2", "next": "/clusters"}, follow_redirects=False)
+    assert r.status_code == 303
+    assert {r["cluster_id"] for r in _csv_rows(tracked_client, "&wave=wave%202")} == set(ids)
+    assert all(t["status"] == "not started" for t in tracking.current(tracked_conn).values())
+
+
+@pytest.mark.live
+def test_clusters_status_filter(tracked_client):
+    assert "No clusters match." in tracked_client.get("/clusters?status=migrated").text
+    assert "No clusters match." not in tracked_client.get("/clusters?status=not%20started").text
+    assert tracked_client.get("/clusters?status=bogus").status_code == 400
+    html = tracked_client.get("/clusters").text
+    assert 'action="/migration/bulk"' in html and "data-select-all" in html and 'name="wave"' in html
+    assert 'value="dev/local"' in html
+    assert 'name="next" value="/clusters?site=dev&amp;view=table"' in tracked_client.get("/clusters?site=dev&view=table").text
+    cards = tracked_client.get("/clusters?view=cards").text
+    assert "<dt>Status</dt><dd>not started</dd>" in cards and 'name="cluster"' not in cards
+    assert 'name="cluster"' in tracked_client.get("/").text
+
+
+@pytest.mark.live
+def test_removed_cluster_page(tracked_client, tracked_conn):
+    tracked_conn.execute("INSERT INTO removed_clusters VALUES ('dev', 'c-gone', 'gone', '2026-11-10T00:00:00+00:00')")
+    tracked_conn.commit()
+    html = tracked_client.get("/clusters/dev/c-gone").text
+    assert "Removed from Rancher" in html and 'id="migration"' in html
+    assert tracked_client.get("/clusters/dev/c-never").status_code == 404
+    r = tracked_client.post("/clusters/dev/c-gone/migration", data={"status": "decommissioned", "csrf": tracked_client.csrf}, follow_redirects=False)
+    assert r.status_code == 303
+    assert tracking.history(tracked_conn, "dev", "c-gone")[0]["name"] == "gone"

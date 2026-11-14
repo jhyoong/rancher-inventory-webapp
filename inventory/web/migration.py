@@ -10,7 +10,7 @@ from inventory.collector.classify import is_system_namespace
 from inventory.collector.rollup import COMPLEXITY_FLAGS
 from inventory.collector.rules import Rules
 from inventory.collector.units import parse_bytes, parse_cpu
-from inventory.web import queries
+from inventory.web import queries, tracking
 from inventory.web.queries import FLAG_COLUMNS, inventory_rows
 
 SERVICE_SIGNALS = ("pinned-ip", "local-traffic-policy", "source-ranges", "shared-ip", "vendor-annotations")
@@ -362,10 +362,15 @@ def cluster_rows(
     cls: str | None = None,
     flag: str | None = None,
     label: str | None = None,
+    status: str | None = None,
+    wave: str | None = None,
 ) -> list[dict]:
-    """Inventory rows plus pools, OS, usage, PVs, floating IPs, databases and Watch out flags per cluster."""
+    """Inventory rows plus pools, OS, usage, PVs, floating IPs, databases, Watch out flags and
+    migration tracking (status, wave, note) per cluster."""
     if flag and flag not in ALL_FLAGS:
         raise ValueError(f"unknown flag: {flag}")
+    if status and status not in tracking.STATUSES:
+        raise ValueError(f"unknown status: {status}")
     stored_flag = flag if flag in FLAG_COLUMNS or flag in COMPLEXITY_FLAGS else None
     rows = inventory_rows(conn, site=site, cls=cls, flag=stored_flag)
     floating = floating_ips(conn, rules, site)
@@ -376,6 +381,15 @@ def cluster_rows(
     hits = label_matches(conn, label) if label else {}
     if label:
         rows = [r for r in rows if (r["site"], r["cluster_id"]) in hits]
+    tracked = tracking.current(conn, site)
+    untracked = {"status": tracking.STATUSES[0], "wave": "", "note": ""}
+    for row in rows:
+        t = tracked.get((row["site"], row["cluster_id"]), untracked)
+        row.update(status=t["status"], wave=t["wave"], note=t["note"])
+    if status:
+        rows = [r for r in rows if r["status"] == status]
+    if wave:
+        rows = [r for r in rows if r["wave"] == wave]
     if not rows:
         return []
 

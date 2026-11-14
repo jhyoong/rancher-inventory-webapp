@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "_csv.html" import csv_link with context %}
 {% from "_class_badge.html" import state, watch_out %}
+{% from "_migration.html" import migration_form with context %}
 {% macro na(v) %}{{ "not available" if v is none or v == "" else v }}{% endmacro %}
 {% macro _cores(v) %}{{ "not available" if v is none else v | cores }}{% endmacro %}
 {% macro _gib(v) %}{{ "not available" if v is none else v | gib }}{% endmacro %}
@@ -32,6 +33,8 @@
   <tr><th>Watch out</th><td>{{ watch_out(c.site, c.cluster_id, flags, p.complexity if p else []) }}</td></tr>
   {% if user.role == "admin" %}<tr><th>Last error</th><td class="error">{{ c.last_error or "none" }}</td></tr>{% endif %}
 </table>
+
+{{ migration_form(c.site, c.cluster_id, tracked, history) }}
 
 <h2 id="nodes">Nodes</h2>
 <p>{% if pools_status == "ok" %}Grouped by machine pool.{% elif pools_status == "none" %}No machine pools (custom or imported cluster), grouped by role.{% else %}Machine pools not collected, grouped by role.{% endif %}

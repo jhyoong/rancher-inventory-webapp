@@ -14,6 +14,9 @@
   <label>Flag <select name="flag"><option value="">any</option>
     {% for s in options.flags %}<option {% if f.flag == s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></label>
   <label>Label <input name="label" value="{{ f.label }}" placeholder="key or key=value"></label>
+  <label>Status <select name="status"><option value="">any</option>
+    {% for s in statuses %}<option {% if f.status == s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></label>
+  <label>Wave <input name="wave" value="{{ f.wave }}" placeholder="exact wave"></label>
   <button type="submit">Filter</button>
 </form>
 <p>{{ csv_link("clusters") }}</p>
