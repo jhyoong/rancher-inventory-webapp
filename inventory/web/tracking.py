@@ -1,7 +1,8 @@
 """Manual migration tracking: status, wave and note per cluster, with a change log."""
 
 import sqlite3
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
+from urllib.parse import quote
 
 STATUSES = ("not started", "planned", "in progress", "migrated", "decommissioned", "won't migrate")
 REMAINING = STATUSES[:3]
@@ -9,6 +10,7 @@ DONE = ("migrated", "decommissioned")
 FINISHED = (*DONE, "won't migrate")
 WAVE_MAX = 100
 NOTE_MAX = 2000
+NO_WAVE = "no wave"
 
 _DEFAULT = {"status": STATUSES[0], "wave": "", "note": "", "updated_by_name": None, "updated_at": None}
 
@@ -111,3 +113,80 @@ def save(
     if own_tx:
         conn.execute("COMMIT")
     return changed
+
+
+def removed(conn: sqlite3.Connection, site: str | None = None) -> list[dict]:
+    """Clusters that left Rancher, newest removal first, with their tracking state."""
+    sql, params = "SELECT site, cluster_id, name, removed_at FROM removed_clusters", ()
+    if site is not None:
+        sql, params = sql + " WHERE site=?", (site,)
+    rows = conn.execute(sql + " ORDER BY removed_at DESC, site, cluster_id", params).fetchall()
+    tracked = current(conn, site)
+    out = []
+    for r in rows:
+        t = tracked.get((r["site"], r["cluster_id"]), _DEFAULT)
+        out.append({
+            "site": r["site"], "cluster_id": r["cluster_id"], "name": r["name"],
+            "removed_at": r["removed_at"], "status": t["status"], "wave": t["wave"],
+            "note": t["note"], "done": t["status"] in FINISHED,
+        })
+    return out
+
+
+def _over_time(conn: sqlite3.Connection, site: str | None, today: date) -> list[dict]:
+    where, params = ("WHERE site=?", (site,)) if site is not None else ("", ())
+    rows = conn.execute(
+        f"SELECT site, cluster_id, status, date(updated_at) AS day FROM migration_tracking_log {where}"
+        " ORDER BY updated_at, id",
+        params,
+    ).fetchall()
+    if not rows:
+        return []
+    day = date.fromisoformat(rows[0]["day"])
+    latest: dict[tuple[str, str], str] = {}
+    i, out = 0, []
+    while day <= today:
+        iso = day.isoformat()
+        while i < len(rows) and rows[i]["day"] <= iso:
+            latest[(rows[i]["site"], rows[i]["cluster_id"])] = rows[i]["status"]
+            i += 1
+        out.append({"day": iso, "done": sum(1 for s in latest.values() if s in DONE)})
+        day += timedelta(days=1)
+    return out
+
+
+def progress(conn: sqlite3.Connection, site: str | None = None, today: date | None = None) -> dict:
+    """Counts by status, site and wave, plus finished clusters per day.
+
+    Clusters are the current ones plus those removed from Rancher.
+    """
+    where, params = ("WHERE site=?", (site,)) if site is not None else ("", ())
+    keys = {
+        (r["site"], r["cluster_id"])
+        for table in ("clusters", "removed_clusters")
+        for r in conn.execute(f"SELECT site, cluster_id FROM {table} {where}", params)
+    }
+    tracked = current(conn, site)
+    zero = {s: 0 for s in STATUSES}
+    by_site: dict[str, dict] = {}
+    by_wave: dict[str, dict] = {}
+    totals = dict(zero)
+    for key in keys:
+        t = tracked.get(key, _DEFAULT)
+        totals[t["status"]] += 1
+        by_site.setdefault(key[0], dict(zero))[t["status"]] += 1
+        by_wave.setdefault(t["wave"] or NO_WAVE, dict(zero))[t["status"]] += 1
+    total = len(keys)
+    suffix = f"&site={quote(site)}" if site is not None else ""
+    waves = sorted(w for w in by_wave if w != NO_WAVE) + ([NO_WAVE] if NO_WAVE in by_wave else [])
+    return {
+        "total": total,
+        "by_status": [
+            {"status": s, "count": totals[s], "pct": round(100 * totals[s] / total, 1) if total else 0,
+             "href": f"/clusters?status={quote(s)}{suffix}"}
+            for s in STATUSES
+        ],
+        "by_site": [{"site": k, "counts": by_site[k]} for k in sorted(by_site)],
+        "by_wave": [{"wave": w, "counts": by_wave[w]} for w in waves],
+        "over_time": _over_time(conn, site, today or datetime.now(timezone.utc).date()),
+    }
