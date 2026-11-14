@@ -409,3 +409,5 @@ def test_home_has_summary_charts(admin_client_collected):
     positions = [html.index(f'id="{i}"') for i in ids]
     assert positions == sorted(positions)
     assert 'id="cpu-chart"' not in html and 'id="mem-chart"' not in html
+    for i in ["capacity-mem-chart", "top-cpu-btn", "top-mem-btn", "top-share", "top-none"]:
+        assert f'id="{i}"' in html

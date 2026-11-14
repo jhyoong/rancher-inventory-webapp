@@ -123,12 +123,18 @@ var VizPalette = {
   var topChart = null;
   function drawTop(key) {
     var t = topSets[key], canvas = document.getElementById("top-chart");
-    if (!canvas) return;  // replaced by "not available"
-    if (topChart) topChart.destroy();
-    topChart = hbars("top-chart", "Top 10 clusters by requested " + t.what,
-                     t.items.map(function (i) { return i.label; }),
-                     [{ label: "Requested " + t.unit, data: t.items.map(function (i) { return num(i.value, t.div); }), color: P.series[0] }],
-                     { hrefs: t.items.map(function (i) { return i.href; }), unit: t.unit });
+    var empty = !t.items.some(function (i) { return i.value !== null && i.value > 0; });
+    if (topChart) { topChart.destroy(); topChart = null; }
+    // The canvas stays in the DOM so the toggle can bring the chart back.
+    canvas.style.display = empty ? "none" : "";
+    var msg = document.getElementById("top-none");
+    msg.textContent = empty ? "Top 10 by requested " + t.what + ": not available" : "";
+    if (!empty) {
+      topChart = hbars("top-chart", "Top 10 clusters by requested " + t.what,
+                       t.items.map(function (i) { return i.label; }),
+                       [{ label: "Requested " + t.unit, data: t.items.map(function (i) { return num(i.value, t.div); }), color: P.series[0] }],
+                       { hrefs: t.items.map(function (i) { return i.href; }), unit: t.unit });
+    }
     document.getElementById("top-share").textContent = t.share === null
       ? "Share of all requested " + t.what + ": not available"
       : "Top 10 = " + t.share + "% of all requested " + t.what;
