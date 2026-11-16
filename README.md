@@ -122,18 +122,53 @@ Notes:
 - `configmaps` is in the list because the plan treats ConfigMap read as part of the base role. Remove it if your security team does not accept it. Only the opt-in `nginx_config_keys` collector reads ConfigMap data.
 - The opt-in collectors (spec section 6.12) need a second RoleTemplate, `inventory-reader-extended`, in [deploy/inventory-reader-extended.yaml](deploy/inventory-reader-extended.yaml). Keep only the blocks of the collectors you switch on, and do not create it until each has security sign-off. All collectors are off by default in `rules.yaml` (`optional_collectors`) and make no calls when off. A 401 or 403 from one of them is logged and skipped.
 
-### Step 3. Bind the role on every downstream cluster
+### Step 3. Give the user the role on every downstream cluster
 
-The user only sees clusters where it has this role. Repeat for each downstream cluster, and for every new cluster added later.
+The user only sees clusters where it has the `inventory-reader` role. There are two ways to grant it.
 
-Option A, the Rancher UI:
+#### Option A (recommended): one GlobalRole for all clusters
+
+A GlobalRole with `inheritedClusterRoles` grants `inventory-reader` on every downstream cluster, including clusters added later. Nothing needs to be done per cluster. This needs Rancher v2.8 or later, and a Rancher admin to create it.
+
+Apply this with `kubectl` against the Rancher local cluster. Replace `u-abc12` with the user ID from step 1:
+
+```yaml
+apiVersion: management.cattle.io/v3
+kind: GlobalRole
+metadata:
+  name: inventory-reader-global
+displayName: inventory-reader-global
+inheritedClusterRoles:
+  - inventory-reader
+---
+apiVersion: management.cattle.io/v3
+kind: GlobalRoleBinding
+metadata:
+  name: inventory-reader-global-binding
+globalRoleName: inventory-reader-global
+userName: u-abc12
+```
+
+In the UI: **Users & Authentication > Role Templates > Global > Create**, name it `inventory-reader-global`, and select `inventory-reader` as an inherited cluster role. Then edit the user `inventory-reader` and tick the new global role.
+
+Notes:
+
+- The role covers every downstream cluster. You cannot leave one out. Use option B if some clusters must not be in the inventory.
+- It never applies to the `local` cluster. Bind `local` by hand (option B) only if you want Rancher's own cluster in the inventory.
+- After applying, run step 6. `/v3/clusters` should list every downstream cluster.
+
+#### Option B: bind the role on each cluster
+
+Repeat for each downstream cluster, and for every new cluster added later.
+
+In the Rancher UI:
 
 1. Open the cluster, go to **Cluster > Cluster Members > Add**.
 2. Select the user `inventory-reader`.
 3. Cluster Permissions: **Custom**, then tick **inventory-reader** only.
 4. Click **Create**.
 
-Option B, `kubectl` against the Rancher local cluster. Replace `c-xxxxx` with the cluster ID (from `kubectl get clusters.management.cattle.io`) and `u-abc12` with the user ID from step 1:
+Or with `kubectl` against the Rancher local cluster. Replace `c-xxxxx` with the cluster ID (from `kubectl get clusters.management.cattle.io`) and `u-abc12` with the user ID from step 1:
 
 ```yaml
 apiVersion: management.cattle.io/v3
@@ -157,6 +192,17 @@ The machine pools (with their labels), the CNI and the cluster CIDRs (plan secti
 - pod ranges come from the node `podCIDR` values.
 
 With this step, custom and imported clusters (which have no machine pools) show pools as "none". Without it, every cluster shows "not collected".
+
+If you used option A in step 3, add this rule to the `inventory-reader-global` GlobalRole. No new binding is needed:
+
+```yaml
+rules:
+  - apiGroups: [provisioning.cattle.io]
+    resources: [clusters]
+    verbs: [get, list]
+```
+
+If you used option B, create a separate GlobalRole and bind it:
 
 ```yaml
 apiVersion: management.cattle.io/v3

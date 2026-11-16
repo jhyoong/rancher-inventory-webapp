@@ -2,7 +2,8 @@
 # Grant it per site, and only after security sign-off for each collector you enable.
 # Keep only the blocks of the collectors you switch on in rules.yaml (optional_collectors).
 # Apply on the Rancher local cluster: kubectl apply -f inventory-reader-extended.yaml
-# Then bind it to the inventory-reader user on each cluster (as in README step 3).
+# Then grant it as in README step 3: add it to inheritedClusterRoles of the
+# inventory-reader-global GlobalRole (option A), or bind it on each cluster (option B).
 apiVersion: management.cattle.io/v3
 kind: RoleTemplate
 metadata:
