@@ -4,7 +4,6 @@ import pytest
 
 from inventory.collector.members import (
     GRB_OWNER_LABEL,
-    ROLETEMPLATE_PATH,
     build_members,
     counts,
     principal_cn,
@@ -16,6 +15,10 @@ from inventory.settings import Site
 RTS = [
     {"metadata": {"name": "cluster-owner"}, "displayName": "Cluster Owner"},
     {"metadata": {"name": "project-member"}, "displayName": "Project Member"},
+]
+NORMAN_RTS = [
+    {"id": "cluster-owner", "name": "Cluster Owner", "type": "roleTemplate"},
+    {"id": "project-member", "name": "Project Member", "type": "roleTemplate"},
 ]
 PROJECTS = [
     {"metadata": {"name": "p-1", "namespace": "c-1"}, "spec": {"clusterName": "c-1", "displayName": "Web"}},
@@ -174,14 +177,18 @@ class FakeClient:
             raise RancherError(f"HTTP {self.status} for {path}", self.status, path)
         if path.endswith("/clusterroletemplatebindings"):
             return [crtb("b1", "c-1", "cluster-owner", userName="u-alice")]
-        if path.endswith("/roletemplates"):
-            return RTS
+        assert not path.endswith("/roletemplates"), "roletemplates must be read from /v3, not the k8s proxy"
         if path.endswith("/projects"):
             return PROJECTS
         return []
 
     async def list_users(self):
         return USERS
+
+    async def list_roletemplates(self):
+        if self.fail_path == "/v3/roletemplates":
+            raise RancherError(f"HTTP {self.status} for /v3/roletemplates", self.status, "/v3/roletemplates")
+        return NORMAN_RTS
 
     async def me(self):
         return {"id": "u-me"}
@@ -191,10 +198,18 @@ def test_read_members_ok():
     r = asyncio.run(read_members(FakeClient()))
     assert r.status == "ok"
     assert r.clusters["c-1"]
+    # role display names come from /v3/roletemplates (Norman shape: id + name)
+    assert r.clusters["c-1"][0].grants[0]["role"] == "Cluster Owner"
+
+
+def test_build_members_accepts_norman_roletemplates():
+    out = build_members([crtb("b1", "c-1", "cluster-owner", userName="u-alice")], [], PROJECTS,
+                        NORMAN_RTS, USERS, None)
+    assert out["c-1"][0].grants == [{"role": "Cluster Owner", "template": "cluster-owner", "scope": "cluster"}]
 
 
 def test_one_forbidden_call_marks_site_forbidden():
-    r = asyncio.run(read_members(FakeClient(ROLETEMPLATE_PATH, 403)))
+    r = asyncio.run(read_members(FakeClient("/v3/roletemplates", 403)))
     assert (r.status, r.clusters) == ("forbidden", {})
     assert r.error
 
@@ -223,7 +238,7 @@ def test_no_warning_when_users_present(caplog):
 
 
 def test_other_error_is_failed():
-    r = asyncio.run(read_members(FakeClient(ROLETEMPLATE_PATH, 500)))
+    r = asyncio.run(read_members(FakeClient("/v3/roletemplates", 500)))
     assert r.status == "failed"
 
 
@@ -285,3 +300,10 @@ def test_read_members_dev(live_loop, live_client, dev_clusters):
     r = live_loop.run_until_complete(read_members(live_client))
     assert r.status == "ok"
     assert set(r.clusters) <= {c["id"] for c in dev_clusters}
+
+
+def test_list_roletemplates_uses_v3(monkeypatch):
+    c, calls = _client(monkeypatch, [{"data": [{"id": "cluster-owner", "name": "Cluster Owner"}]}])
+    rts = asyncio.run(c.list_roletemplates())
+    assert [r["id"] for r in rts] == ["cluster-owner"]
+    assert calls[0][0] == "/v3/roletemplates"

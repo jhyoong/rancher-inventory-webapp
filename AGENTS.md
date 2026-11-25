@@ -18,8 +18,8 @@ uv run pytest -m "not live and not slow"  # offline tests
 uv run pytest tests/test_classify.py::test_name   # one test
 uv run pytest -m slow                     # slow tests (excluded by default via addopts)
 uv run inventory <command>                # CLI: serve | check-config | collect-once | healthcheck | backup FILE | export-discovery --out DIR | user add|passwd|list|disable
-docker build -t rancher-inventory:1.1.0-dev .        # local image
-docker buildx build --platform linux/amd64 -t rancher-inventory:1.1.0 --load .   # airgap image
+docker build -t rancher-inventory:1.1.1-dev .        # local image
+docker buildx build --platform linux/amd64 -t rancher-inventory:1.1.1 --load .   # airgap image
 ```
 
 There is no linter or formatter configured.

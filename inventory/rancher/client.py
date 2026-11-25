@@ -124,6 +124,14 @@ class RancherClient:
         """Every Rancher user (/v3/users), following pagination.next."""
         return await self._list_v3("/v3/users", page_size)
 
+    async def list_roletemplates(self, page_size: int | None = None) -> list[dict]:
+        """Every RoleTemplate (/v3/roletemplates, Norman shape: id = object name, name = display name).
+
+        RoleTemplates are global (cluster-scoped) management objects. Rancher serves GlobalRole
+        rules for them on /v3 only; the /k8s/clusters/local proxy answers 403 for the same rule.
+        """
+        return await self._list_v3("/v3/roletemplates", page_size)
+
     async def list_kind(self, cluster_id: str, path: str, page_size: int = 500) -> list[dict]:
         base, _, query = f"/k8s/clusters/{cluster_id}{path}".partition("?")
         url = base
