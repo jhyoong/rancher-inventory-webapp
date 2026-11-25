@@ -21,6 +21,7 @@ from inventory.web.routes import (
     auth,
     check,
     clusters,
+    columns,
     crds,
     export,
     health,
@@ -115,7 +116,7 @@ def create_app(settings: Settings, collector: CollectorThread | None) -> FastAPI
     app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
     for module in (
         auth, home, clusters, inventory, network, helm, crds, annotations, workloads, storage, namespaces, platform,
-        runs, query, presets, check, admin, health, export, api, tracking,
+        runs, query, presets, check, admin, columns, health, export, api, tracking,
     ):
         app.include_router(module.router)
     return app

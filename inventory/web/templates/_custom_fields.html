@@ -1,0 +1,22 @@
+{# needs: from "_custom_fields.html" import custom_form with context (uses csrf) #}
+{% macro custom_form(site, cluster_id, columns, current) %}
+{% if columns %}
+<h2 id="custom">Custom fields</h2>
+<form method="post" action="/clusters/{{ site | urlencode }}/{{ cluster_id | urlencode }}/custom" class="migration-form">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  {% for col in columns %}
+  <label>{{ col.name }}
+    {% if col.type == "choice" %}
+    <select name="cf{{ col.id }}">
+      <option value="">none</option>
+      {% for ch in col.choices %}<option value="{{ ch }}" {% if current.get(col.id) == ch %}selected{% endif %}>{{ ch }}</option>{% endfor %}
+    </select>
+    {% else %}
+    <input name="cf{{ col.id }}" value="{{ current.get(col.id, '') }}" maxlength="100" placeholder="none">
+    {% endif %}
+  </label>
+  {% endfor %}
+  <button type="submit">Save</button>
+</form>
+{% endif %}
+{% endmacro %}

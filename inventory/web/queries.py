@@ -74,7 +74,7 @@ def header_context(conn: sqlite3.Connection, settings: Settings) -> dict:
 
 _CLUSTER_SQL = """
 SELECT c.site, c.cluster_id, c.name, c.state, c.provider, c.k8s_version, c.node_count,
-       c.last_ok_at, c.last_error,
+       c.last_ok_at, c.last_error, c.members_status, c.members_at,
        m.cpu_alloc_m, m.cpu_req_m, m.cpu_used_m, m.mem_alloc_b, m.mem_req_b, m.mem_used_b
 FROM clusters c
 LEFT JOIN cluster_metrics_latest m ON m.site = c.site AND m.cluster_id = c.cluster_id
@@ -87,6 +87,27 @@ def clusters(conn: sqlite3.Connection) -> list[sqlite3.Row]:
 
 def cluster(conn: sqlite3.Connection, site: str, cluster_id: str) -> sqlite3.Row | None:
     return conn.execute(_CLUSTER_SQL + " WHERE c.site=? AND c.cluster_id=?", (site, cluster_id)).fetchone()
+
+
+def cluster_members(conn: sqlite3.Connection, site: str, cluster_id: str) -> list[dict]:
+    rows = conn.execute(
+        "SELECT kind, subject, display_name, username, disabled, grants FROM cluster_members"
+        " WHERE site=? AND cluster_id=? ORDER BY ord",
+        (site, cluster_id),
+    ).fetchall()
+    return [{**dict(r), "grants": json.loads(r["grants"])} for r in rows]
+
+
+def member_counts(conn: sqlite3.Connection, site: str | None) -> dict[tuple[str, str], tuple[int, int]]:
+    """Enabled users and groups per cluster; clusters without member rows are absent."""
+    where, args = ("WHERE site=?", (site,)) if site else ("", ())
+    rows = conn.execute(
+        f"""SELECT site, cluster_id,
+                   SUM(kind = 'user' AND disabled = 0) AS users, SUM(kind = 'group') AS groups
+            FROM cluster_members {where} GROUP BY site, cluster_id""",
+        args,
+    )
+    return {(r["site"], r["cluster_id"]): (r["users"], r["groups"]) for r in rows}
 
 
 def cluster_metrics(conn: sqlite3.Connection, site: str, cluster_id: str) -> list[dict]:

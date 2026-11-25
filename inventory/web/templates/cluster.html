@@ -2,6 +2,7 @@
 {% from "_csv.html" import csv_link with context %}
 {% from "_class_badge.html" import state, watch_out %}
 {% from "_migration.html" import migration_form with context %}
+{% from "_custom_fields.html" import custom_form with context %}
 {% macro na(v) %}{{ "not available" if v is none or v == "" else v }}{% endmacro %}
 {% macro _cores(v) %}{{ "not available" if v is none else v | cores }}{% endmacro %}
 {% macro _gib(v) %}{{ "not available" if v is none else v | gib }}{% endmacro %}
@@ -33,6 +34,31 @@
   <tr><th>Watch out</th><td>{{ watch_out(c.site, c.cluster_id, flags, p.complexity if p else []) }}</td></tr>
   {% if user.role == "admin" %}<tr><th>Last error</th><td class="error">{{ c.last_error or "none" }}</td></tr>{% endif %}
 </table>
+
+<h2 id="members">Members</h2>
+{% if members.status == "ok" or (members.status == "failed" and members.at) %}
+{% if members.status == "failed" %}<p class="warn">The last member read failed. This is the list from {{ members.at | dt }}.</p>{% endif %}
+{% if members.rows %}
+<table>
+  <tr><th>Name</th><th>Username</th><th>Type</th><th>Roles</th><th>Scope</th></tr>
+  {% for m in members.rows %}
+  <tr><td>{{ m.display_name }}{% if m.disabled %} <span class="muted">(disabled)</span>{% endif %}</td>
+      <td>{{ m.username or "" }}</td><td>{{ m.kind }}</td>
+      <td>{% for g in m.grants %}{{ g.role }}{% if not loop.last %}<br>{% endif %}{% endfor %}</td>
+      <td>{% for g in m.grants %}{{ g.scope }}{% if not loop.last %}<br>{% endif %}{% endfor %}</td></tr>
+  {% endfor %}
+</table>
+{% else %}<p>No members besides global admins.</p>{% endif %}
+<p class="muted">Rancher global admins can also access this cluster.</p>
+{% elif members.status == "failed" %}
+<p class="warn">The member read failed and no earlier list exists.</p>
+<p class="muted">Rancher global admins can also access this cluster.</p>
+{% else %}
+<p>Members not collected. To collect them, follow the README step "Allow reading cluster members" (#step-5-allow-reading-cluster-members-optional).</p>
+<p class="muted">Rancher global admins can also access this cluster.</p>
+{% endif %}
+
+{{ custom_form(c.site, c.cluster_id, custom_columns, custom_current) }}
 
 {{ migration_form(c.site, c.cluster_id, tracked, history) }}
 

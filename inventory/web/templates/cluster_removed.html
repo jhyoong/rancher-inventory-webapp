@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_migration.html" import migration_form with context %}
+{% from "_custom_fields.html" import custom_form with context %}
 {% block title %}{{ c.name }} - Rancher inventory{% endblock %}
 {% block content %}
 <h1>{{ c.name }} <span class="muted">({{ c.site }} / {{ c.cluster_id }})</span></h1>
@@ -8,7 +9,9 @@
   <tr><th>Site</th><td>{{ c.site }}</td></tr>
   <tr><th>Cluster id</th><td>{{ c.cluster_id }}</td></tr>
 </table>
-<p>Removed from Rancher on {{ c.removed_at | day }}. The inventory no longer holds its data; only the migration tracking is kept.</p>
+<p>Removed from Rancher on {{ c.removed_at | day }}. The inventory no longer holds its data; only the migration tracking and custom fields are kept.</p>
+
+{{ custom_form(c.site, c.cluster_id, custom_columns, custom_current) }}
 
 {{ migration_form(c.site, c.cluster_id, tracked, history) }}
 {% endblock %}

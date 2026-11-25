@@ -57,7 +57,7 @@
 <h2 id="removed">Removed from Rancher</h2>
 {% if removed %}
 <form method="post" action="/migration/bulk" class="bulk-edit">
-{{ bulk_bar(removed_next) }}
+{{ bulk_bar(removed_next, custom=False) }}
 <table>
   <tr><th class="nosort"><input type="checkbox" data-select-all aria-label="Select all shown"></th>
       <th>Site</th><th>Cluster</th><th>Removed</th><th>Status</th><th>Wave</th><th>Note</th></tr>

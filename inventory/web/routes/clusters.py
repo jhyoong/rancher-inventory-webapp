@@ -3,7 +3,7 @@ import sqlite3
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from inventory.collector.rules import load_rules
-from inventory.web import migration, queries, tracking
+from inventory.web import custom_columns, migration, queries, tracking
 from inventory.web.auth import User
 from inventory.web.deps import csv_download, current_user, get_settings, read_db, render, wants_csv
 
@@ -15,25 +15,36 @@ VIEWS = ("table", "cards")
 @router.get("/clusters")
 def clusters(request: Request, conn: sqlite3.Connection = Depends(read_db), user: User = Depends(current_user)):
     q = request.query_params
-    f = {k: q.get(k, "").strip() for k in ("site", "cls", "flag", "label", "status", "wave")}
+    f = {k: q.get(k, "").strip() for k in ("site", "cls", "flag", "label", "status", "wave", "member")}
     view = q.get("view") if q.get("view") in VIEWS else "table"
     rules = load_rules(get_settings(request))
+    columns = custom_columns.list_columns(conn)
+    custom_f, notices = custom_columns.parse_filters(columns, q)
     try:
-        rows = migration.cluster_rows(conn, rules, **{k: v or None for k, v in f.items()})
+        rows = migration.cluster_rows(conn, rules, custom=custom_f, **{k: v or None for k, v in f.items()})
     except ValueError as e:
         raise HTTPException(400, str(e))
     if wants_csv(request):
         keep = {(r["site"], r["cluster_id"]) for r in rows}
         # "inventory" is the table of the old /inventory CSV link: its columns and encoding, for the filtered clusters
         old = [r for r in queries.inventory_rows(conn, site=f["site"] or None) if (r["site"], r["cluster_id"]) in keep]
-        return csv_download(
-            request, user, "clusters", {"clusters": [migration.flat_row(r) for r in rows], "inventory": old}
-        )
+        flat = [{**migration.flat_row(r), **custom_columns.csv_fields(columns, r)} for r in rows]
+        return csv_download(request, user, "clusters", {"clusters": flat, "inventory": old})
     options = {**queries.inventory_filter_options(conn), "flags": list(migration.ALL_FLAGS)}
     return render(
         request, conn, user, "clusters.html", rows=rows, f=f, view=view, options=options,
-        site_names=queries.site_names(conn),
+        site_names=queries.site_names(conn), custom_columns=columns, custom_f=custom_f, notices=notices,
     )  # fmt: skip
+
+
+def _custom_ctx(conn: sqlite3.Connection, site: str, cluster_id: str) -> dict:
+    return {
+        "custom_columns": custom_columns.list_columns(conn),
+        "custom_current": custom_columns.values(conn, site).get((site, cluster_id), {}),
+        "history": custom_columns.merged_history(
+            tracking.history(conn, site, cluster_id), custom_columns.history(conn, site, cluster_id)
+        ),
+    }
 
 
 @router.get("/clusters/{site}/{cluster_id}")
@@ -54,9 +65,13 @@ def cluster(
             raise HTTPException(404, "cluster not found")
         return render(
             request, conn, user, "cluster_removed.html", c=dict(gone),
-            tracked=tracking.get(conn, site, cluster_id), history=tracking.history(conn, site, cluster_id),
+            tracked=tracking.get(conn, site, cluster_id), **_custom_ctx(conn, site, cluster_id),
         )  # fmt: skip
     metrics = queries.cluster_metrics(conn, site, cluster_id)
+    members = {
+        "status": row["members_status"], "at": row["members_at"],
+        "rows": queries.cluster_members(conn, site, cluster_id),
+    }  # fmt: skip
     rules = load_rules(get_settings(request))
     sheet = migration.cluster_sheet(conn, rules, site, cluster_id)
     # namespaces first: a bare ?format=csv returns it, as before the migration sheet
@@ -75,8 +90,8 @@ def cluster(
     if wants_csv(request):
         return csv_download(request, user, f"cluster-{site}-{cluster_id}", tables)
     return render(
-        request, conn, user, "cluster.html", c=row, p=queries.cluster_inventory(conn, site, cluster_id),
+        request, conn, user, "cluster.html", c=row, members=members, p=queries.cluster_inventory(conn, site, cluster_id),
         flags=sheet["flags"], floating=sheet["floating"], pools_status=sheet["pools_status"], groups=sheet["groups"],
-        tracked=tracking.get(conn, site, cluster_id), history=tracking.history(conn, site, cluster_id),
+        tracked=tracking.get(conn, site, cluster_id), **_custom_ctx(conn, site, cluster_id),
         **tables,
     )  # fmt: skip

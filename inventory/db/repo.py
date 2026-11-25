@@ -239,3 +239,33 @@ def write_api_versions(
             " VALUES (?, ?, ?, 'in_use', ?, ?)",
             [(site, cluster_id, gv, kind, n) for (gv, kind), n in sorted(in_use.items())],
         )
+
+
+def write_members(conn: sqlite3.Connection, site: str, cluster_id: str, result, now: str) -> None:
+    """Store one cluster's member read (spec: Storage). Does nothing without a clusters row.
+
+    ok replaces the rows, forbidden deletes them and clears members_at, failed keeps rows and members_at.
+    """
+    with transaction(conn):
+        if conn.execute("SELECT 1 FROM clusters WHERE site=? AND cluster_id=?", (site, cluster_id)).fetchone() is None:
+            return
+        key = (site, cluster_id)
+        if result.status == "ok":
+            conn.execute("DELETE FROM cluster_members WHERE site=? AND cluster_id=?", key)
+            conn.executemany(
+                "INSERT INTO cluster_members (site, cluster_id, kind, subject, display_name, username, disabled, grants, ord) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    (site, cluster_id, m.kind, m.subject, m.display_name, m.username,
+                     1 if m.disabled else 0, json.dumps(m.grants), i)
+                    for i, m in enumerate(result.clusters.get(cluster_id, []))
+                ],
+            )  # fmt: skip
+            conn.execute(
+                "UPDATE clusters SET members_status='ok', members_at=? WHERE site=? AND cluster_id=?", (now, *key)
+            )
+        elif result.status == "forbidden":
+            conn.execute("DELETE FROM cluster_members WHERE site=? AND cluster_id=?", key)
+            conn.execute("UPDATE clusters SET members_status='forbidden', members_at=NULL WHERE site=? AND cluster_id=?", key)
+        else:
+            conn.execute("UPDATE clusters SET members_status='failed' WHERE site=? AND cluster_id=?", key)

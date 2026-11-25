@@ -12,8 +12,14 @@
 {% macro _lb(r) %}{% if not r.collected %}not collected{% else %}{{ r.floating.implementations | join(", ") if r.floating.implementations else "none" }}{% endif %}{% endmacro %}
 {% macro _watch_out(r) %}{% if not r.collected %}not collected{% else %}{{ watch_out(r.site, r.cluster_id, r.flags, r.complexity) }}{% endif %}{% endmacro %}
 
+{# a custom column cell: unset (or a choice no longer defined) sorts last; text sorts by its value; links to the filter on the overview #}
+{% macro _custom_td(c, r) %}{% set v = r.custom.get(c.id) %}{% set k = custom_sort_key(c, v) %}{% if k is none %}<td data-sort-last="1">{{ v if v is not none else "none" }}</td>{% else %}<td data-sort="{{ k }}">{% if request.url.path == "/" %}<a href="/clusters?cf{{ c.id }}={{ v | urlencode }}">{{ v }}</a>{% else %}{{ v }}{% endif %}</td>{% endif %}{% endmacro %}
+
+{# the Members cell; a stale read shows the old counts, with the read date as a tooltip #}
+{% macro _members(r) %}{% if r.members_status == "failed" and r.member_users is not none %}<span title="last collected {{ r.members_at | dt }}">{{ members_cell(r) }}</span>{% else %}{{ members_cell(r) }}{% endif %}{% endmacro %}
+
 {# the hidden fields and the bar of a bulk edit form; the caller opens the form and lists the rows #}
-{% macro bulk_bar(next) %}
+{% macro bulk_bar(next, custom=True) %}
 <input type="hidden" name="csrf" value="{{ csrf }}">
 <input type="hidden" name="next" value="{{ next }}">
 <p class="bulk-bar">
@@ -21,6 +27,12 @@
     {% for s in statuses %}<option>{{ s }}</option>{% endfor %}</select></label>
   <label>Wave <input name="wave" maxlength="{{ wave_max }}" placeholder="no change"></label>
   <label><input type="checkbox" name="clear_wave" value="1"> Clear wave</label>
+  {% if custom %}{% for c in custom_columns or [] %}
+  {% if c.type == "choice" %}<label>{{ c.name }} <select name="cf{{ c.id }}"><option value="">no change</option><option value="none">clear</option>
+    {% for v in c.choices %}<option value="{{ v }}">{{ v }}</option>{% endfor %}</select></label>
+  {% else %}<label>{{ c.name }} <input name="cf{{ c.id }}" maxlength="100" placeholder="no change"></label>
+  <label><input type="checkbox" name="cf{{ c.id }}_clear" value="1"> Clear {{ c.name }}</label>
+  {% endif %}{% endfor %}{% endif %}
   <button type="submit">Apply to selected</button>
 </p>
 {% endmacro %}
@@ -40,6 +52,9 @@
       <dt>Site</dt><dd>{{ r.site }}</dd>
       <dt>Status</dt><dd>{{ r.status }}</dd>
       <dt>Wave</dt><dd>{{ r.wave or "none" }}</dd>
+      {% for c in custom_columns or [] %}<dt>{{ c.name }}</dt><dd>{{ r.custom.get(c.id) or "none" }}</dd>
+      {% endfor %}
+      <dt>Members</dt><dd>{{ _members(r) }}</dd>
       <dt>Kubernetes</dt><dd>{{ r.k8s_version or "not available" }}</dd>
       <dt>Nodes</dt><dd>{{ _nodes(r) }}</dd>
       <dt>Pools</dt><dd>{{ _pools(r) }}</dd>
@@ -62,7 +77,7 @@
 {{ bulk_bar(request.url.path ~ ("?" ~ request.url.query if request.url.query else "")) }}
 <table>
   <tr><th class="nosort"><input type="checkbox" data-select-all aria-label="Select all shown"></th>
-      <th>Site</th><th>Cluster</th><th>Status</th><th>Wave</th><th>Kubernetes</th><th>Nodes</th><th>Pools</th><th>OS</th>
+      <th>Site</th><th>Cluster</th><th>Status</th><th>Wave</th>{% for c in custom_columns or [] %}<th>{{ c.name }}</th>{% endfor %}<th>Members</th><th>Kubernetes</th><th>Nodes</th><th>Pools</th><th>OS</th>
       <th>vCPU alloc / req / used</th><th>Memory GiB alloc / req / used</th><th>PVs</th><th>Floating IPs</th>
       <th>LB</th><th>Watch out</th>{% if matched %}<th>Matched</th>{% endif %}</tr>
   {% for r in rows %}
@@ -72,6 +87,8 @@
     <td>{{ _cluster(r) }}</td>
     <td>{{ r.status }}</td>
     <td>{{ r.wave or "none" }}</td>
+    {% for c in custom_columns or [] %}{{ _custom_td(c, r) }}{% endfor %}
+    <td>{{ _members(r) }}</td>
     <td>{{ r.k8s_version or "not available" }}</td>
     <td class="r">{{ _nodes(r) }}</td>
     <td class="r">{{ _pools(r) }}</td>
@@ -85,7 +102,7 @@
     {% if matched %}<td>{{ r.label_hits | join(", ") }}</td>{% endif %}
   </tr>
   {% else %}
-  <tr><td colspan="15">No clusters match.</td></tr>
+  <tr><td colspan="{{ 16 + (custom_columns or []) | length }}">No clusters match.</td></tr>
   {% endfor %}
 </table>
 </form>
