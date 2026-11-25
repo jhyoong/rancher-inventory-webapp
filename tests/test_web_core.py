@@ -169,7 +169,7 @@ def _all_routes(routes):
 
 
 def _concrete(path: str) -> str:
-    values = {"site": "dev", "cluster_id": "local", "run_id": "1", "preset_id": "1"}
+    values = {"site": "dev", "cluster_id": "local", "run_id": "1", "preset_id": "1", "column_id": "1"}
     return re.sub(r"\{(\w+)\}", lambda m: values[m.group(1)], path)
 
 

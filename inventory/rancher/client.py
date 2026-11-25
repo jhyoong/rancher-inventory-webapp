@@ -74,37 +74,55 @@ class RancherClient:
         except ValueError:
             raise RancherError(f"invalid JSON from {url}", resp.status_code, url) from None
 
-    async def whoami(self) -> str:
+    async def me(self) -> dict:
         url = f"{self._base}/v3/users"
         data = await self.get_json("/v3/users", {"me": "true"})
         try:
-            return data["data"][0]["username"]
+            user = data["data"][0]
         except (KeyError, IndexError, TypeError):
             raise RancherError(f"unexpected response from {url}", 200, url) from None
+        if not isinstance(user, dict):
+            raise RancherError(f"unexpected response from {url}", 200, url)
+        return user
 
-    async def list_clusters(self, page_size: int | None = None) -> list[dict]:
-        """Every cluster, following pagination.next. Any page error raises."""
-        path: str | None = "/v3/clusters"
+    async def whoami(self) -> str:
+        url = f"{self._base}/v3/users"
+        try:
+            return (await self.me())["username"]
+        except KeyError:
+            raise RancherError(f"unexpected response from {url}", 200, url) from None
+
+    async def _list_v3(self, path: str, page_size: int | None = None) -> list[dict]:
+        """Every item of a /v3 collection, following pagination.next. Any page error raises."""
+        cur: str | None = path
         params: dict | None = {"limit": page_size} if page_size else None
-        clusters: list[dict] = []
+        items: list[dict] = []
         seen: set[str] = set()
-        while path:
-            url = f"{self._base}{path}"
-            data = await self.get_json(path, params)
+        while cur:
+            url = f"{self._base}{cur}"
+            data = await self.get_json(cur, params)
             page = data.get("data") if isinstance(data, dict) else None
             if not isinstance(page, list) or not all(isinstance(c, dict) and "id" in c for c in page):
                 raise RancherError(f"unexpected response from {url}", 200, url)
-            clusters.extend(page)
+            items.extend(page)
             nxt = (data.get("pagination") or {}).get("next")
             if not nxt:
                 break
             if not nxt.startswith(self._base + "/"):
                 raise RancherError(f"pagination link to another host from {url}", 200, url)
-            path, params = nxt[len(self._base):], None
-            if path in seen:
+            cur, params = nxt[len(self._base):], None
+            if cur in seen:
                 raise RancherError(f"pagination loop at {url}", 200, url)
-            seen.add(path)
-        return clusters
+            seen.add(cur)
+        return items
+
+    async def list_clusters(self, page_size: int | None = None) -> list[dict]:
+        """Every cluster, following pagination.next. Any page error raises."""
+        return await self._list_v3("/v3/clusters", page_size)
+
+    async def list_users(self, page_size: int | None = None) -> list[dict]:
+        """Every Rancher user (/v3/users), following pagination.next."""
+        return await self._list_v3("/v3/users", page_size)
 
     async def list_kind(self, cluster_id: str, path: str, page_size: int = 500) -> list[dict]:
         base, _, query = f"/k8s/clusters/{cluster_id}{path}".partition("?")

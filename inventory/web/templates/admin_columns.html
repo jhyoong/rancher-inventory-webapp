@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Columns - Rancher inventory{% endblock %}
+{% block content %}
+<h1>Columns</h1>
+{% if in_use %}
+<p class="error">"{{ in_use.exc.value }}" is used by
+  <a href="/clusters?cf{{ in_use.column_id }}={{ in_use.exc.value | urlencode }}">{{ in_use.exc.live }} cluster{{ "" if in_use.exc.live == 1 else "s" }}</a>{% if in_use.exc.removed %}
+  and by removed clusters:
+  {% for r in in_use.exc.removed %}<a href="/clusters/{{ r.site | urlencode }}/{{ r.cluster_id | urlencode }}">{{ r.name }}</a>{{ ", " if not loop.last }}{% endfor %}{% endif %}.
+  Clear the value on those clusters first, or use Rename choice to change its spelling.</p>
+{% elif unmatched %}
+<div class="error"><p>{{ error }}</p>
+<ul>{% for it in unmatched.values_ %}
+  <li>"{{ it.value }}": <a href="/clusters?cf{{ unmatched.column_id }}={{ it.value | urlencode }}">{{ it.live }} cluster{{ "" if it.live == 1 else "s" }}</a>{% if it.removed %}
+    and removed clusters:
+    {% for r in it.removed %}<a href="/clusters/{{ r.site | urlencode }}/{{ r.cluster_id | urlencode }}">{{ r.name }}</a>{{ ", " if not loop.last }}{% endfor %}{% endif %}</li>
+{% endfor %}</ul></div>
+{% elif error %}<p class="error">{{ error }}</p>{% endif %}
+<table>
+  <tr><th>Name</th><th>Type</th><th>Choices</th><th>In use</th><th>Actions</th></tr>
+  {% for r in rows %}
+  {% set c = r.col %}
+  <tr>
+    <td>{{ c.name }}</td>
+    <td>{{ c.type }}</td>
+    <td>{{ c.choices | join(", ") }}</td>
+    <td>{{ r.live }} cluster{{ "" if r.live == 1 else "s" }}{% if r.removed %} + {{ r.removed }} removed{% endif %}</td>
+    <td>
+      {% set first = loop.first %}{% set last = loop.last %}
+      {% for d, label in (("up", "Up"), ("down", "Down")) %}{% if not (d == "up" and first) and not (d == "down" and last) %}
+      <form method="post" action="/admin/columns" class="inline">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="column_id" value="{{ c.id }}">
+        <input type="hidden" name="direction" value="{{ d }}">
+        <button name="action" value="move">{{ label }}</button>
+      </form>
+      {% endif %}{% endfor %}
+      <form method="post" action="/admin/columns" class="inline">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="column_id" value="{{ c.id }}">
+        <input name="name" value="{{ c.name }}" maxlength="40" required>
+        <button name="action" value="rename">Rename</button>
+      </form>
+      {% if c.type == "choice" %}
+      <form method="post" action="/admin/columns">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="column_id" value="{{ c.id }}">
+        <label>Choices (one per line)<br><textarea name="choices" rows="4">{{ c.choices | join("\n") }}</textarea></label>
+        <button name="action" value="choices">Save choices</button>
+      </form>
+      <form method="post" action="/admin/columns" class="inline">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="column_id" value="{{ c.id }}">
+        <select name="old">{% for ch in c.choices %}<option value="{{ ch }}">{{ ch }}</option>{% endfor %}</select>
+        <input name="new" placeholder="New spelling" maxlength="100" required>
+        <button name="action" value="rename_choice">Rename choice</button>
+      </form>
+      {% endif %}
+      <form method="post" action="/admin/columns" class="inline">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="column_id" value="{{ c.id }}">
+        <select name="type">
+          <option value="text"{{ " selected" if c.type == "text" }}>text</option>
+          <option value="choice"{{ " selected" if c.type == "choice" }}>choice</option>
+        </select>
+        <textarea name="choices" rows="2" placeholder="Choices, one per line (choice type)">{{ c.choices | join("\n") }}</textarea>
+        <button name="action" value="type">Change type</button>
+      </form>
+      <a href="/admin/columns/{{ c.id }}/delete">Delete</a>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+
+<h2>Add column</h2>
+<form method="post" action="/admin/columns">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="action" value="add">
+  <label>Name <input name="name" maxlength="40" required></label>
+  <label>Type
+    <select name="type"><option value="text">text</option><option value="choice">choice</option></select>
+  </label>
+  <label>Choices (one per line, choice type only) <textarea name="choices" rows="4"></textarea></label>
+  <button type="submit">Add</button>
+</form>
+{% endblock %}

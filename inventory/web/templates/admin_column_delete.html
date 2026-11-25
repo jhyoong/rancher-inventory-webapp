@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Delete column - Rancher inventory{% endblock %}
+{% block content %}
+<h1>Delete column "{{ col.name }}"</h1>
+<p>This removes the column and its values, and its change history, for
+  {{ live }} cluster{{ "" if live == 1 else "s" }}{% if removed %} and {{ removed }} removed cluster{{ "" if removed == 1 else "s" }}{% endif %}.
+  This cannot be undone.</p>
+<form method="post" action="/admin/columns/{{ col.id }}/delete">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <button type="submit">Delete column</button>
+  <a href="/admin/columns">Cancel</a>
+</form>
+{% endblock %}

@@ -14,11 +14,21 @@
   <label>Flag <select name="flag"><option value="">any</option>
     {% for s in options.flags %}<option {% if f.flag == s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></label>
   <label>Label <input name="label" value="{{ f.label }}" placeholder="key or key=value"></label>
+  <label>Member <input name="member" value="{{ f.member }}" placeholder="name or username"></label>
   <label>Status <select name="status"><option value="">any</option>
     {% for s in statuses %}<option {% if f.status == s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></label>
   <label>Wave <input name="wave" value="{{ f.wave }}" placeholder="exact wave"></label>
+  {% for col in custom_columns %}
+  <label>{{ col.name }}
+    {% if col.type == "choice" %}<select name="cf{{ col.id }}"><option value="">any</option>
+      <option value="none"{% if custom_f.get(col.id) == "none" %} selected{% endif %}>none</option>
+      {% for ch in col.choices %}<option value="{{ ch }}"{% if custom_f.get(col.id) == ch %} selected{% endif %}>{{ ch }}</option>{% endfor %}</select>
+    {% else %}<input name="cf{{ col.id }}" value="{{ custom_f.get(col.id, '') }}" placeholder="exact value">{% endif %}
+  </label>
+  {% endfor %}
   <button type="submit">Filter</button>
 </form>
+{% for n in notices %}<p class="warn">{{ n }}</p>{% endfor %}
 <p>{{ csv_link("clusters") }}</p>
 {{ site_refresh(site_names) }}
 {{ cluster_list(rows, view) }}

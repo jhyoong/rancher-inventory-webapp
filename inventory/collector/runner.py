@@ -11,10 +11,11 @@ from datetime import datetime, timezone
 
 from inventory.collector.cluster import collect_cluster
 from inventory.collector.kinds import KindSpec, load_kinds
+from inventory.collector.members import MembersResult, read_members
 from inventory.collector.provisioning import ProvisioningResult, read_provisioning
 from inventory.collector.rules import Rules, load_rules
 from inventory.db.connection import connect
-from inventory.db.repo import mark_cluster_failed, transaction
+from inventory.db.repo import mark_cluster_failed, transaction, write_members
 from inventory.rancher.client import RancherClient
 from inventory.settings import ConfigError, Settings, Site, load_sites, site_token
 
@@ -256,6 +257,10 @@ async def _execute(settings: Settings, conn: sqlite3.Connection, run_id: int, sh
             conn.execute("UPDATE runs SET clusters_total=? WHERE id=?", (len(work), run_id))
 
         provisioning = {name: await read_provisioning(c) for name, (c, _) in clients.items()}
+        members = {name: await _read_members_safely(name, c, token) for name, (c, token) in clients.items()}
+        for name, result in members.items():
+            if result.status != "ok":
+                log.warning("site %s: members %s: %s", name, result.status, result.error)
         sems = {name: asyncio.Semaphore(settings.concurrency_per_site) for name in clients}
 
         async def one(site: Site, cluster: dict) -> str:
@@ -268,9 +273,27 @@ async def _execute(settings: Settings, conn: sqlite3.Connection, run_id: int, sh
 
         statuses = await asyncio.gather(*(one(s, c) for s, c in work))
 
+        for site, cluster in work:
+            try:
+                write_members(conn, site.name, cluster["id"], members[site.name], _now())
+            except Exception as e:
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
+                log.warning("members of %s/%s not stored: %s", site.name, cluster["id"], type(e).__name__)
+
     status = _final_status(cancelled(), should_stop(), len(sites), site_errors, list(statuses))
     _finish(conn, run_id, status, "; ".join(site_errors) or None)
     return status
+
+
+async def _read_members_safely(site: str, client: RancherClient, token: str) -> MembersResult:
+    """A member read never fails the run: any exception becomes a 'failed' result (old rows are kept)."""
+    try:
+        return await read_members(client)
+    except Exception as e:
+        error = _scrub(str(e) or type(e).__name__, token)
+        log.warning("site %s: member read raised %s: %s", site, type(e).__name__, error)
+        return MembersResult("failed", {}, error)
 
 
 def _remove_unlisted(conn: sqlite3.Connection, site: str, listed: set[str]) -> None:
@@ -287,7 +310,7 @@ def _remove_unlisted(conn: sqlite3.Connection, site: str, listed: set[str]) -> N
             )
             for table in (
                 "resources", "namespace_profile", "cluster_profile", "cluster_metrics_latest", "clusters",
-                "api_versions", "optional_results", "machine_pools",
+                "api_versions", "optional_results", "machine_pools", "cluster_members",
             ):
                 conn.execute(f"DELETE FROM {table} WHERE site=? AND cluster_id=?", (site, cid))
         log.info("removed cluster %s/%s: Rancher no longer lists it", site, cid)

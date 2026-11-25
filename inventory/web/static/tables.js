@@ -42,7 +42,9 @@
     var body = table.tBodies[0];
     var keyed = groups(table).map(function (g, i) {
       var cell = g.row.cells[col];
-      return { g: g, i: i, k: cell ? key(cell.textContent) : { last: true } };
+      var k = !cell ? { last: true } : cell.dataset.sortLast ? { last: true } :
+        cell.dataset.sort !== undefined ? key(cell.dataset.sort) : key(cell.textContent);
+      return { g: g, i: i, k: k };
     });
     keyed.sort(function (x, y) {
       // missing values stay last in both directions

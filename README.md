@@ -155,7 +155,7 @@ Notes:
 
 - The role covers every downstream cluster. You cannot leave one out. Use option B if some clusters must not be in the inventory.
 - It never applies to the `local` cluster. Bind `local` by hand (option B) only if you want Rancher's own cluster in the inventory.
-- After applying, run step 6. `/v3/clusters` should list every downstream cluster.
+- After applying, run step 7. `/v3/clusters` should list every downstream cluster.
 
 #### Option B: bind the role on each cluster
 
@@ -223,7 +223,48 @@ globalRoleName: inventory-provisioning-reader
 userName: u-abc12
 ```
 
-### Step 5. Create the API token
+### Step 5. Allow reading cluster members (optional)
+
+The Members list on each cluster page (and the Members column and member filter) comes from the Rancher role bindings on the Rancher local cluster. This step is optional. Without it, members show "not collected".
+
+The rule needs `clusterroletemplatebindings`, `projectroletemplatebindings`, `projects` and `roletemplates` to read who has access and with which role. It also needs `users`, so that `/v3/users` lists other users' names. Without `users`, `/v3/users` returns only the service user itself. The app reads only `/v3/users`. It never reads the raw User objects.
+
+If you used option A in step 3, add this rule to the `inventory-reader-global` GlobalRole. No new binding is needed:
+
+```yaml
+rules:
+  - apiGroups: [management.cattle.io]
+    resources: [clusterroletemplatebindings, projectroletemplatebindings, projects, roletemplates, users]
+    verbs: [get, list]
+```
+
+If you used option B, create a separate GlobalRole and bind it. Replace `u-abc12` with the user ID from step 1:
+
+```yaml
+apiVersion: management.cattle.io/v3
+kind: GlobalRole
+metadata:
+  name: inventory-members-reader
+displayName: inventory-members-reader
+rules:
+  - apiGroups: [management.cattle.io]
+    resources: [clusterroletemplatebindings, projectroletemplatebindings, projects, roletemplates, users]
+    verbs: [get, list]
+---
+apiVersion: management.cattle.io/v3
+kind: GlobalRoleBinding
+metadata:
+  name: inventory-members-reader-binding
+globalRoleName: inventory-members-reader
+userName: u-abc12
+```
+
+Notes:
+
+- Global admins are not listed on each cluster. They appear only where they hold an explicit cluster or project binding.
+- Bindings that Rancher creates from global roles, the service user itself, and system users are left out.
+
+### Step 6. Create the API token
 
 1. Log out, then log in to Rancher as `inventory-reader`.
 2. Go to the user menu (top right) **> Account & API Keys > Create API Key**.
@@ -232,7 +273,7 @@ userName: u-abc12
 5. Click **Create** and copy the **Bearer Token** (looks like `token-abc12:xxxxxxxx`). It is shown only once.
 6. Note the expiry date. It goes into `sites.yaml` as `token_expires`.
 
-### Step 6. Test the token
+### Step 7. Test the token
 
 From the VM that will run the app:
 
@@ -250,6 +291,10 @@ curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $TOKEN" \
 # 3. No Secret access (expect 403)
 curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $TOKEN" \
   "$RANCHER/k8s/clusters/c-xxxxx/api/v1/secrets"
+
+# 4. Optional (step 5): members can be read (expect 200)
+curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $TOKEN" \
+  "$RANCHER/k8s/clusters/local/apis/management.cattle.io/v3/clusterroletemplatebindings?limit=1"
 ```
 
 Add `--cacert /path/to/ca.pem` if Rancher uses a private CA.
@@ -328,7 +373,7 @@ EXPORT_SENSITIVE_STRINGS=example.com,ExampleCorp
 | --- | --- | --- |
 | `SESSION_SECRET` | Yes | Output of `openssl rand -hex 32` |
 | `ADMIN_PASSWORD` | First start | A password of 12 or more characters. Remove the line after the first start |
-| `RANCHER_<NAME>_TOKEN` | Yes, per site | The bearer token from Rancher setup step 5 |
+| `RANCHER_<NAME>_TOKEN` | Yes, per site | The bearer token from Rancher setup step 6 |
 | `TLS_CERT_FILE`, `TLS_KEY_FILE` | No | Paths inside the container. Empty means plain HTTP |
 | `COOKIE_SECURE` | No | Default `true`. Set `false` only for plain-HTTP dev on localhost |
 | `COLLECT_DAILY_AT` | No | Daily start time, default `02:00` |
@@ -345,7 +390,7 @@ sites:
     url: https://rancher-site-1.example.com    # Rancher URL, no trailing slash
     token_env: RANCHER_SITE_1_TOKEN            # name of the variable in .env
     ca_file: /config/ca/rancher-site-1.pem     # optional, for a private CA
-    token_expires: 2026-12-20                  # from Rancher setup step 5
+    token_expires: 2026-12-20                  # from Rancher setup step 6
   - name: rancher-site-2
     url: https://rancher-site-2.example.com
     token_env: RANCHER_SITE_2_TOKEN
@@ -421,7 +466,7 @@ Check after the first run: `check-config` passes for every site and lists RBAC g
 
 ## Backup, restore and upgrade
 
-Only users, presets and trend history cannot be collected again. Back them up daily, for example from cron:
+Only users, presets, migration tracking, custom column values and trend history cannot be collected again. Back them up daily, for example from cron:
 
 ```bash
 docker exec rancher-inventory inventory backup /data/backup-$(date +%F).db
@@ -459,6 +504,13 @@ The pages are built for planning a move from VMware and NSX to Nutanix NKP.
 - **Cluster page (`/clusters/<site>/<cluster>`)**: a migration sheet with nodes grouped by machine pool, CNI, CIDRs, databases found, and the Watch out flags for that cluster.
 - **Watch out flags** mark things that need a decision before a move, for example `node-pinned-pv`, `database`, `external-ip`, `nodeport`, `host-network`, `k8s<1.32` and `privileged/hostpath`. Each flag links to the cluster page section with the rows behind it.
 - **Floating IPs**: the number of distinct addresses a cluster needs to keep. It counts LoadBalancer Service addresses (status ingress and a pinned `spec.loadBalancerIP`), Service `spec.externalIPs`, ingress controller LB addresses and node ExternalIP addresses, plus 1 for the control plane endpoint when Rancher shows one. Each address counts once, under the first source that has it (LoadBalancer, then ingress LB, then `spec.externalIPs`, then node ExternalIP), so the sources add up to the total. The `external-ip` Watch out flag shows when a LoadBalancer address, a Service `spec.externalIPs` address or an ingress LB address exists; node ExternalIP addresses and the control plane endpoint count as floating IPs but do not set it. The "External IP" column on the cluster page is only the `spec.externalIPs` source, so `external-ip` can show while that column is 0 (for example when the only address is an ingress LB address). IPs that NSX assigns outside Kubernetes (for example SNAT or manual NAT rules) are not visible to the app and are not in this count.
+- **Custom columns**: admins add, rename, reorder and delete extra fields at `/admin/columns`. A column is free text or a choice list; the order of the choices is their sort order. `none` cannot be used as a value.
+  - Any user sets values on the cluster page (removed clusters too) and in the bulk-edit bar.
+  - Every change is logged in the cluster's history.
+  - On `/clusters`, filter by a column with `cf<id>=value` in the URL. For a choice column, `none` means no value. Text columns match ignoring case.
+  - The `/clusters` CSV has a `custom_<name>` column for each custom column.
+  - Collection runs never change custom values.
+- **Members**: the Rancher members of each cluster (users and groups, with their roles and project scopes). The `/clusters` list has a Members column and a member filter, and the cluster page has a Members section. Needs [step 5](#step-5-allow-reading-cluster-members-optional); without it members show "not collected".
 - **Old URLs** `/inventory`, `/helm`, `/crds`, `/annotations` and `/namespaces` redirect (307) to the new pages and keep the query string, so saved links still work.
 
 `tests/fixtures/real/` holds fixtures from real clusters. It is git-ignored and exists only on the dev Mac. Tests that need it are skipped when it is missing ("P2 fixtures missing").

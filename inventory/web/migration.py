@@ -10,7 +10,7 @@ from inventory.collector.classify import is_system_namespace
 from inventory.collector.rollup import COMPLEXITY_FLAGS
 from inventory.collector.rules import Rules
 from inventory.collector.units import parse_bytes, parse_cpu
-from inventory.web import queries, tracking
+from inventory.web import custom_columns, queries, tracking
 from inventory.web.queries import FLAG_COLUMNS, inventory_rows
 
 SERVICE_SIGNALS = ("pinned-ip", "local-traffic-policy", "source-ranges", "shared-ip", "vendor-annotations")
@@ -355,6 +355,15 @@ def label_matches(conn: sqlite3.Connection, label: str) -> dict[tuple[str, str],
     return out
 
 
+def members_cell(row: dict) -> str:
+    """The Members cell text: starts with the user count so the table sorts by it."""
+    if row.get("member_users") is None:
+        return "not collected"
+    u, g = row["member_users"], row["member_groups"]
+    text = f"{u} user{'' if u == 1 else 's'}, {g} group{'' if g == 1 else 's'}"
+    return text + (" (stale)" if row.get("members_status") == "failed" else "")
+
+
 def cluster_rows(
     conn: sqlite3.Connection,
     rules: Rules,
@@ -364,6 +373,8 @@ def cluster_rows(
     label: str | None = None,
     status: str | None = None,
     wave: str | None = None,
+    custom: dict[int, str] | None = None,
+    member: str | None = None,
 ) -> list[dict]:
     """Inventory rows plus pools, OS, usage, PVs, floating IPs, databases, Watch out flags and
     migration tracking (status, wave, note) per cluster."""
@@ -392,6 +403,42 @@ def cluster_rows(
         rows = [r for r in rows if r["wave"] == wave]
     if not rows:
         return []
+    stored = custom_columns.values(conn, site)
+    for row in rows:
+        row["custom"] = stored.get((row["site"], row["cluster_id"]), {})
+    if custom:
+        by_id = {c.id: c for c in custom_columns.list_columns(conn)}
+        rows = [r for r in rows if custom_columns.matches(by_id, custom, r["custom"])]
+        if not rows:
+            return []
+
+    counts = queries.member_counts(conn, site)
+    status = {
+        (m["site"], m["cluster_id"]): m
+        for m in conn.execute("SELECT site, cluster_id, members_status, members_at FROM clusters" + (" WHERE site=?" if site else ""), (site,) if site else ())
+    }
+    for row in rows:
+        key = (row["site"], row["cluster_id"])
+        st = status.get(key)
+        users, groups = counts.get(key, (0, 0))
+        collected = bool(st and st["members_status"] == "ok" or st and st["members_status"] == "failed" and st["members_at"])
+        row.update(
+            members_status=st["members_status"] if st else None, members_at=st["members_at"] if st else None,
+            member_users=users if collected else None, member_groups=groups if collected else None,
+        )  # fmt: skip
+    if member:
+        needle = member.casefold()  # SQLite lower() folds ASCII only, so match here
+        where_m, args_m = _scope(site, None, "m")
+        hit = {
+            (m["site"], m["cluster_id"])
+            for m in conn.execute(
+                f"SELECT site, cluster_id, display_name, username FROM cluster_members m WHERE 1=1{where_m}", args_m
+            )
+            if needle in (m["display_name"] or "").casefold() or needle in (m["username"] or "").casefold()
+        }
+        rows = [r for r in rows if (r["site"], r["cluster_id"]) in hit]
+        if not rows:
+            return []
 
     where, args = _scope(site, None, "c")
     r_where, r_args = _scope(site, None, "r")
@@ -587,6 +634,10 @@ def flat_row(row: dict) -> dict:
     """
     out = {}
     for k, v in row.items():
+        if k in ("members_status", "members_at", "member_users", "member_groups"):
+            continue  # the member columns are added below, as counts only, never names
+        if k == "custom":
+            continue  # a dict of column values; the route adds one field per column
         if k == "floating":
             out["floating_total"] = v["total"]
             for s in FLOATING_SOURCES:
@@ -596,6 +647,13 @@ def flat_row(row: dict) -> dict:
             out[k] = "; ".join(str(x) for x in v)
         else:
             out[k] = v
+    if "members_status" in row:
+        users = row["member_users"]
+        out["member_users"] = NOT_COLLECTED if users is None else users
+        out["member_groups"] = NOT_COLLECTED if users is None else row["member_groups"]
+        out["members_status"] = (
+            NOT_COLLECTED if users is None else "stale" if row["members_status"] == "failed" else "ok"
+        )
     if not row.get("collected", True):
         for k in out:
             if k in ("pv_count", "pv_bytes", "lb_implementations", "flags") or k.startswith("floating_"):

@@ -460,3 +460,82 @@ def test_scheduler_fires(collected_db, tmp_path, open_db):
     finally:
         t.stop(timeout=120)
     assert row is not None and row["triggered_by"] is None
+
+
+class _Result:
+    status, kinds_total, kinds_done, objects, error = "ok", 1, 1, 0, None
+
+
+def _offline_run(monkeypatch, members):
+    """Patch everything that talks to Rancher: two clusters a and b on site dev."""
+
+    async def list_clusters(self):
+        return [{"id": "a", "name": "a"}, {"id": "b", "name": "b"}]
+
+    async def no_prov(client):
+        return None
+
+    async def stub_collect(*args, **kwargs):
+        return _Result()
+
+    monkeypatch.setattr(runner.RancherClient, "list_clusters", list_clusters)
+    monkeypatch.setattr(runner, "read_provisioning", no_prov)
+    monkeypatch.setattr(runner, "collect_cluster", stub_collect)
+    monkeypatch.setattr(runner, "read_members", members)
+
+
+def test_member_read_exception_does_not_affect_run(settings, db, db_path, monkeypatch, open_db, caplog):
+    async def broken(client):
+        raise RuntimeError("members boom")
+
+    _offline_run(monkeypatch, broken)
+    for cid in ("a", "b"):
+        db.execute("INSERT INTO clusters (site, cluster_id, name) VALUES ('dev', ?, ?)", [cid, cid])
+    db.execute(
+        "INSERT INTO cluster_members VALUES ('dev', 'a', 'user', 'u-1', 'ann', 'ann', 0, '[]', 0)"
+    )
+    rid = create_run(db, "manual", "t", Scope())
+    assert asyncio.run(execute_run(settings, rid)) == "ok"
+    rows = open_db(db_path).execute("SELECT cluster_id, members_status FROM clusters ORDER BY cluster_id").fetchall()
+    assert [tuple(r) for r in rows] == [("a", "failed"), ("b", "failed")]
+    assert open_db(db_path).execute("SELECT count(*) FROM cluster_members").fetchone()[0] == 1
+    assert "members boom" in caplog.text
+
+
+def test_write_members_exception_is_swallowed(settings, db, db_path, monkeypatch, open_db, caplog):
+    from inventory.collector.members import MembersResult
+
+    async def read(client):
+        return MembersResult("ok", {})
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("write boom")
+
+    _offline_run(monkeypatch, read)
+    monkeypatch.setattr(runner, "write_members", boom)
+    for cid in ("a", "b"):
+        db.execute("INSERT INTO clusters (site, cluster_id, name) VALUES ('dev', ?, ?)", [cid, cid])
+    rid = create_run(db, "manual", "t", Scope())
+    assert asyncio.run(execute_run(settings, rid)) == "ok"
+    assert "members of dev/a not stored" in caplog.text
+    assert open_db(db_path).execute("SELECT status FROM runs WHERE id=?", [rid]).fetchone()[0] == "ok"
+
+
+def test_scoped_run_only_changes_scoped_cluster_members(settings, db, db_path, monkeypatch, open_db):
+    from inventory.collector.members import Member, MembersResult
+
+    new = Member("user", "u-new", "new", "new", False, [])
+
+    async def read(client):
+        return MembersResult("ok", {"a": [new], "b": [new]})
+
+    _offline_run(monkeypatch, read)
+    for cid in ("a", "b"):
+        db.execute("INSERT INTO clusters (site, cluster_id, name) VALUES ('dev', ?, ?)", [cid, cid])
+        db.execute(
+            "INSERT INTO cluster_members VALUES ('dev', ?, 'user', 'u-old', 'old', 'old', 0, '[]', 0)", [cid]
+        )
+    rid = create_run(db, "manual", "t", Scope(site="dev", cluster_id="a"))
+    assert asyncio.run(execute_run(settings, rid)) == "ok"
+    rows = open_db(db_path).execute("SELECT cluster_id, subject FROM cluster_members ORDER BY cluster_id").fetchall()
+    assert [tuple(r) for r in rows] == [("a", "u-new"), ("b", "u-old")]

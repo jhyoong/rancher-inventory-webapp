@@ -3,7 +3,7 @@ from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Request
 
-from inventory.web import migration, queries, tracking
+from inventory.web import custom_columns, migration, queries, tracking
 from inventory.web.auth import User
 from inventory.collector.optional import active
 from inventory.collector.rules import load_rules
@@ -32,6 +32,6 @@ def home(request: Request, conn: sqlite3.Connection = Depends(read_db), user: Us
     removed_next = "/" + ("?" + urlencode(kept) if kept else "") + "#removed"
     return render(
         request, conn, user, "home.html", overview=queries.overview(conn),
-        site=site, view=view, scope=scope, scope_links=scope_links, data=data, progress=progress, removed=removed, removed_next=removed_next, chart_data={**data["charts"], "progress": progress},
+        site=site, view=view, scope=scope, scope_links=scope_links, data=data, progress=progress, removed=removed, removed_next=removed_next, custom_columns=custom_columns.list_columns(conn), chart_data={**data["charts"], "progress": progress},
         site_names=queries.site_names(conn), optins=active(rules),
     )  # fmt: skip

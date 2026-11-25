@@ -14,6 +14,13 @@
 <table>
   <tr><th>Time</th><th>User</th><th>Status</th><th>Wave</th><th>Note</th></tr>
   {% for h in history %}
+  {% if h.kind == "custom" %}
+  <tr>
+    <td>{{ h.updated_at | dt }}</td>
+    <td>{{ h.updated_by_name or "a deleted user" }}</td>
+    <td colspan="3">{{ h.column_name }}: {{ h.value or "cleared" }}</td>
+  </tr>
+  {% else %}
   <tr>
     <td>{{ h.updated_at | dt }}</td>
     <td>{{ h.updated_by_name or "a deleted user" }}</td>
@@ -21,6 +28,7 @@
     <td>{{ h.wave or "none" }}</td>
     <td>{{ h.note or "none" }}</td>
   </tr>
+  {% endif %}
   {% endfor %}
 </table>
 {% else %}
