@@ -11,8 +11,8 @@ Things to check by hand on the dev cluster with image `rancher-inventory:1.0.1-d
 
 ## 2. Network access
 
-- [ ] Opens on the Mac: `http://localhost:8443`.
-- [ ] Opens from another device on the LAN: `http://192.168.50.212:8443` (the Mac's current IP; check it with `ipconfig getifaddr en0`).
+- [ ] Opens on the dev machine: `http://localhost:8443`.
+- [ ] Opens from another device on the LAN: `http://<host-ip>:8443` (the dev machine's current LAN IP).
 - [ ] Login works from the other device. `COOKIE_SECURE=false` is needed while serving plain HTTP.
 - [ ] Browser network tab: every request goes to the same host and port, none to the internet.
 

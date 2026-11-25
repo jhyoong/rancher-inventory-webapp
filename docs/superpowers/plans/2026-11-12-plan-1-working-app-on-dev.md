@@ -6,7 +6,7 @@
 
 **Architecture:** One Python process. `inventory serve` runs a FastAPI web app and a collector thread with its own asyncio loop. The collector reads Rancher through `/v3` and the `/k8s/clusters/<id>/` proxy and writes to one SQLite file. The web app only reads that file.
 
-**Tech Stack:** Python 3.12, uv, FastAPI, uvicorn, httpx, Jinja2, HTMX 2, Chart.js 4, pydantic-settings, PyYAML, python-multipart, SQLite (stdlib), pytest. Docker Desktop on the dev Mac (arm64).
+**Tech Stack:** Python 3.12, uv, FastAPI, uvicorn, httpx, Jinja2, HTMX 2, Chart.js 4, pydantic-settings, PyYAML, python-multipart, SQLite (stdlib), pytest. Docker on the dev machine.
 
 **Spec:** `Rancher Inventory Tool Implementation Plan (single image, airgap).md` (repo root). Sections 1 to 6.8, 7 (pages listed for phases 3 to 5), 8 and 9 phases 1 to 5. Plan 2 (`2026-11-12-plan-2-detail-hardening-airgap.md`) covers phases 6 to 10.
 
@@ -28,7 +28,7 @@
 
 ### Dev environment facts (verified 2026-11-12)
 
-- Rancher v2.14.0 at `https://rancher.local`, IP `192.168.50.210`. Bare-IP requests return 404.
+- Rancher v2.14.0 at `https://rancher.local`, IP `<dev-rancher-ip>`. Bare-IP requests return 404.
 - TLS uses the ingress placeholder certificate. TLS checks are skipped in dev through `tls_verify: false` in `sites.yaml` (decided by the user; not in the spec).
 - Service user `inventory-reader`, token with no scope, expires 2027-02-10.
 - One visible cluster: `local` (RKE2 v1.34.3, 3 nodes). All 36 kinds return 200; Secrets and `provisioning.cattle.io` return 403.
@@ -371,7 +371,7 @@ Use that index digest in both `FROM` lines: `python:3.12-slim@sha256:<digest>`.
 
 - [ ] **Step 2: Write `Dockerfile`** as in spec section 4, with these changes: pinned digest; `COPY config/defaults/ /app/defaults/`; `ENV DEFAULTS_DIR=/app/defaults DATA_DIR=/data SITES_FILE=/config/sites.yaml PYTHONDONTWRITEBYTECODE=1`. `.dockerignore` excludes `.env`, `.venv`, `dev/`, `tests/`, `.git`, `docs/`.
 
-- [ ] **Step 3: Build** (Docker Desktop must be running)
+- [ ] **Step 3: Build** (Docker must be running)
 
 Run: `docker build -t rancher-inventory:dev .`
 Expected: build succeeds.
@@ -379,7 +379,7 @@ Expected: build succeeds.
 - [ ] **Step 4: Run check-config in the container**
 
 ```bash
-docker run --rm --env-file .env --add-host rancher.local:192.168.50.210 \
+docker run --rm --env-file .env --add-host rancher.local:<dev-rancher-ip> \
   -v $PWD/dev/config:/config:ro rancher-inventory:dev check-config
 ```
 
@@ -766,7 +766,7 @@ def test_filter_annotations_rules(rules):
     assert out["team.example.com/owner"] == ("x" * 256, True)
 ```
 
-Live: `test_node_addresses` (each node from `dev_lists` gives a `node-internal` address equal to its `InternalIP`), `test_service_cluster_ips` (non-headless services give `cluster-ip`, headless give none), `test_ingress_nginx_lb` (`collected_db` has at least one `addresses` row for `192.168.50.210`, since ingress-nginx serves that IP; if this fails, record what `status.loadBalancer` actually holds on dev and adjust the expected role, not the code).
+Live: `test_node_addresses` (each node from `dev_lists` gives a `node-internal` address equal to its `InternalIP`), `test_service_cluster_ips` (non-headless services give `cluster-ip`, headless give none), `test_ingress_nginx_lb` (`collected_db` has at least one `addresses` row for `<dev-rancher-ip>`, since ingress-nginx serves that IP; if this fails, record what `status.loadBalancer` actually holds on dev and adjust the expected role, not the code).
 
 - [ ] **Step 2: Run and see them fail**
 - [ ] **Step 3: Implement**
@@ -899,7 +899,7 @@ def test_inventory_has_local(admin_client_collected):  # /inventory contains "lo
 def test_network_search_node_ip(admin_client_collected, dev_lists):
     ip = next(a["address"] for a in dev_lists["nodes"][0]["status"]["addresses"] if a["type"] == "InternalIP")
     assert "local" in admin_client_collected.get(f"/network?q={ip}").text
-def test_network_prefix(admin_client_collected):  # q=192.168.50. returns >= 1 row
+def test_network_prefix(admin_client_collected):  # q=<dev-subnet-prefix>. returns >= 1 row
 def test_helm_page_lists_rancher_chart(admin_client_collected):  # /helm contains "rancher-webhook" and "cert-manager"
 def test_helm_matches_catalog(collected_db, dev_lists):  # helm_releases total == len(dev_lists["helmreleases"])
 def test_crds_custom_toggle(admin_client_collected):  # /crds?custom_only=1 does not contain "management.cattle.io"
@@ -916,7 +916,7 @@ def test_cluster_page_profile(admin_client_collected):  # /clusters/dev/local co
 ### Task 16: Build the image and run it against dev (plan 1 done)
 
 **Files:**
-- Modify: `README.md` (add "Run on the dev Mac" section with the commands below)
+- Modify: `README.md` (add "Run on the dev machine" section with the commands below)
 
 - [ ] **Step 1: Full test suite**
 
@@ -933,7 +933,7 @@ Run: `docker build -t rancher-inventory:1.0.0-dev .`
 mkdir -p dev/data
 docker run -d --name rancher-inventory \
   --env-file .env \
-  --add-host rancher.local:192.168.50.210 \
+  --add-host rancher.local:<dev-rancher-ip> \
   -v $PWD/dev/config:/config:ro \
   -v $PWD/dev/data:/data \
   -p 8443:8443 \
@@ -942,7 +942,7 @@ docker run -d --name rancher-inventory \
 docker logs -f rancher-inventory
 ```
 
-Expected: log shows first admin created, a run started (no good run yet) and finished `ok`. If `/data` is not writable, run `chmod 777 dev/data` (Docker Desktop on macOS maps ownership; this is dev only).
+Expected: log shows first admin created, a run started (no good run yet) and finished `ok`. If `/data` is not writable, run `chmod 777 dev/data` (some Docker setups map volume ownership differently; this is dev only).
 
 - [ ] **Step 4: Container health**
 
@@ -957,7 +957,7 @@ Check each item and note the result:
 - [ ] "Refresh now" shows the progress bar, which disappears when the run ends; `/runs/{id}` shows `local` with all kinds done.
 - [ ] `/clusters` totals (nodes, CPU, memory) match the Rancher dashboard for `local`.
 - [ ] `/helm` lists the same 18 releases as Rancher's Apps > Installed Apps, including the two `failed` ones.
-- [ ] `/network?q=192.168.50.210` finds the ingress or node.
+- [ ] `/network?q=<dev-rancher-ip>` finds the ingress or node.
 - [ ] `/inventory` shows a class for `local`. Then create a test StatefulSet with a PVC in a new namespace (as a Rancher admin), refresh, and confirm the class becomes `stateful`. Delete it afterwards and refresh again.
 - [ ] A preset for `deployments` named `rke2-coredns` shows `local` as present on `/check`.
 - [ ] Restart the container during a run (`docker restart rancher-inventory`); the run shows `interrupted` and the pages still show data.

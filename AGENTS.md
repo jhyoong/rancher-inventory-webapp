@@ -27,7 +27,7 @@ There is no linter or formatter configured.
 ### Test environment
 
 - `tests/conftest.py` loads the repo-root `.env` and points `SITES_FILE` at `dev/config/sites.yaml`. Without a `.env`, offline tests still need `SESSION_SECRET` and `RANCHER_DEV_TOKEN` set (any value), e.g. `SESSION_SECRET=x RANCHER_DEV_TOKEN=dummy uv run pytest -m "not live and not slow"`.
-- Markers: `live` needs the dev Rancher (`https://rancher.local`, `192.168.50.210` in `/etc/hosts`, real `RANCHER_DEV_TOKEN`); `slow` is deselected unless `-m slow`; `real_fixtures` need git-ignored JSON in `tests/fixtures/real/` and skip with "P2 fixtures missing" when absent. Passing `-m` on the command line replaces the default `-m 'not slow'`.
+- Markers: `live` needs the dev Rancher (`https://rancher.local`, `<dev-rancher-ip>` in `/etc/hosts`, real `RANCHER_DEV_TOKEN`); `slow` is deselected unless `-m slow`; `real_fixtures` need git-ignored JSON in `tests/fixtures/real/` and skip with "P2 fixtures missing" when absent. Passing `-m` on the command line replaces the default `-m 'not slow'`.
 - Live fixtures (`dev_live`, `live_client`, `collected_db`, `dev_lists`) are session-scoped and share one event loop (`live_loop`) so the suite opens one Rancher connection.
 - Web tests use `web_app`/`client`/`admin_client`/`viewer_client` fixtures; POSTs need the CSRF token the login helper stores on `client.csrf`.
 

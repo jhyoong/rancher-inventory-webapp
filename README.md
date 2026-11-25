@@ -4,7 +4,7 @@ A web app that keeps a daily inventory of every downstream cluster managed by on
 
 The full design is in [Rancher Inventory Tool Implementation Plan (single image, airgap).md](<Rancher Inventory Tool Implementation Plan (single image, airgap).md>).
 
-Status: version 1.1.1. Plans 1 and 2, the migration views, migration tracking, custom columns and cluster members are built and tested on the dev Mac against the dev Rancher, in Docker, including a restore and an upgrade drill. The `linux/amd64` image is built for the airgap; the install on the airgap host itself is not done yet (see [Airgap install](#airgap-install)).
+Status: version 1.1.1. Plans 1 and 2, the migration views, migration tracking, custom columns and cluster members are built and tested on the dev machine against the dev Rancher, in Docker, including a restore and an upgrade drill. The `linux/amd64` image is built for the airgap; the install on the airgap host itself is not done yet (see [Airgap install](#airgap-install)).
 
 ## Contents
 
@@ -21,7 +21,7 @@ Status: version 1.1.1. Plans 1 and 2, the migration views, migration tracking, c
 11. [Rules for networking and databases](#rules-for-networking-and-databases)
 12. [Known behaviour](#known-behaviour)
 13. [Dev cluster notes](#dev-cluster-notes)
-14. [Run on the dev Mac](#run-on-the-dev-mac)
+14. [Run on the dev machine](#run-on-the-dev-machine)
 
 ## What you need
 
@@ -521,7 +521,7 @@ The pages are built for planning a move from VMware and NSX to Nutanix NKP.
 - **Members**: the Rancher members of each cluster (users and groups, with their roles and project scopes). The `/clusters` list has a Members column and a member filter, and the cluster page has a Members section. Needs [step 5](#step-5-allow-reading-cluster-members-optional); without it members show "not collected".
 - **Old URLs** `/inventory`, `/helm`, `/crds`, `/annotations` and `/namespaces` redirect (307) to the new pages and keep the query string, so saved links still work.
 
-`tests/fixtures/real/` holds fixtures from real clusters. It is git-ignored and exists only on the dev Mac. Tests that need it are skipped when it is missing ("P2 fixtures missing").
+`tests/fixtures/real/` holds fixtures from real clusters. It is git-ignored and exists only on the dev machine. Tests that need it are skipped when it is missing ("P2 fixtures missing").
 
 ## Rules for networking and databases
 
@@ -555,13 +555,13 @@ To extend a list, copy `config/defaults/rules.yaml` to `config/rules.yaml` and e
 
 ## Dev cluster notes
 
-The dev Rancher server at `192.168.50.210`:
+The dev Rancher server (`<dev-rancher-ip>` below stands for its private IP):
 
 - Rancher v2.14.0, served by ingress-nginx under the hostname `rancher.local`. Requests to the bare IP return 404.
-- `rancher.local` does not resolve from the dev Mac. Add it to `/etc/hosts`:
+- `rancher.local` does not resolve from the dev machine. Add it to `/etc/hosts`:
 
   ```
-  192.168.50.210 rancher.local
+  <dev-rancher-ip> rancher.local
   ```
 
 - The ingress serves its self-signed placeholder certificate (`Kubernetes Ingress Controller Fake Certificate`, SAN `ingress.local`). It does not match `rancher.local`, so a `ca_file` alone will not make TLS verify. The dev site therefore uses `tls_verify: false`. This is for dev only. Fix it on the cluster by giving the Rancher ingress a certificate for `rancher.local`.
@@ -577,7 +577,7 @@ sites:
     token_expires: 2027-02-10
 ```
 
-## Run on the dev Mac
+## Run on the dev machine
 
 Build the image and run it against the dev Rancher. This needs `.env` and `dev/config/sites.yaml` in the repo.
 
@@ -589,7 +589,7 @@ docker build -t rancher-inventory:1.1.1-dev .
 mkdir -p dev/data
 docker run -d --name rancher-inventory \
   --env-file .env \
-  --add-host rancher.local:192.168.50.210 \
+  --add-host rancher.local:<dev-rancher-ip> \
   -v $PWD/dev/config:/config:ro \
   -v $PWD/dev/data:/data \
   -p 8443:8443 \
@@ -599,7 +599,7 @@ docker logs -f rancher-inventory
 ```
 
 - The log shows the first admin being created and a first run starting when there is no good run yet.
-- If `/data` is not writable, run `chmod 777 dev/data`. Docker Desktop on macOS maps ownership. This is for dev only.
+- If `/data` is not writable, run `chmod 777 dev/data`. Some Docker setups map volume ownership differently. This is for dev only.
 - Check health after about a minute: `docker inspect --format '{{.State.Health.Status}}' rancher-inventory` should print `healthy`.
 - Open `http://localhost:8443` and log in with `ADMIN_USER` and `ADMIN_PASSWORD` from `.env`.
 - Stop and remove: `docker rm -f rancher-inventory`. The data stays in `dev/data`.
