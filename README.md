@@ -4,7 +4,7 @@ A web app that keeps a daily inventory of every downstream cluster managed by on
 
 The full design is in [Rancher Inventory Tool Implementation Plan (single image, airgap).md](<Rancher Inventory Tool Implementation Plan (single image, airgap).md>).
 
-Status: plans 1 and 2 are built and tested on the dev Mac against the dev Rancher, in Docker, including a restore and an upgrade drill. The `linux/amd64` image is built for the airgap; the install on the airgap host itself is not done yet (see [Airgap install](#airgap-install)).
+Status: version 1.1.0. Plans 1 and 2, the migration views, migration tracking, custom columns and cluster members are built and tested on the dev Mac against the dev Rancher, in Docker, including a restore and an upgrade drill. The `linux/amd64` image is built for the airgap; the install on the airgap host itself is not done yet (see [Airgap install](#airgap-install)).
 
 ## Contents
 
@@ -413,7 +413,7 @@ cd /opt/rancher-inventory
 
 # 1. Check URLs, tokens, CA files and RBAC for every site
 docker run --rm --env-file .env -v $PWD/config:/config:ro \
-  rancher-inventory:1.0.0 check-config
+  rancher-inventory:1.1.0 check-config
 
 # 2. Run
 docker run -d --name rancher-inventory --restart unless-stopped \
@@ -422,7 +422,7 @@ docker run -d --name rancher-inventory --restart unless-stopped \
   -v $PWD/data:/data \
   -p 8443:8443 \
   --read-only --tmpfs /tmp --cap-drop ALL \
-  rancher-inventory:1.0.0
+  rancher-inventory:1.1.0
 ```
 
 `check-config` reports for each site: URL reachable and TLS trusted, token valid and days to expiry, number of clusters visible, and which kinds return 403 on one sample cluster. Fix any 403 by adding the missing rule to the RoleTemplate.
@@ -438,10 +438,10 @@ The image tar is built on a connected machine and carried across. Nothing is dow
 The build installs exactly the package versions in `uv.lock`, checked by hash. Build for the CPU architecture of the airgap VM (`linux/amd64` here; use `linux/arm64` if `uname -m` on the VM prints `aarch64`).
 
 ```bash
-docker buildx build --platform linux/amd64 -t rancher-inventory:1.0.0 --load .
+docker buildx build --platform linux/amd64 -t rancher-inventory:1.1.0 --load .
 mkdir -p dist
-docker save rancher-inventory:1.0.0 | gzip > dist/rancher-inventory-1.0.0.tar.gz
-(cd dist && shasum -a 256 rancher-inventory-1.0.0.tar.gz > rancher-inventory-1.0.0.tar.gz.sha256)
+docker save rancher-inventory:1.1.0 | gzip > dist/rancher-inventory-1.1.0.tar.gz
+(cd dist && shasum -a 256 rancher-inventory-1.1.0.tar.gz > rancher-inventory-1.1.0.tar.gz.sha256)
 ```
 
 Carry across: the tar, its `.sha256` file, `config/sites.yaml`, any CA and TLS files, and `deploy/` if you use the extended role. Do not carry `.env`; write it on the airgap host.
@@ -453,8 +453,8 @@ Carry across: the tar, its `.sha256` file, `config/sites.yaml`, any CA and TLS f
 curl -m 5 https://pypi.org
 
 # 1. Verify and load the image
-sha256sum -c rancher-inventory-1.0.0.tar.gz.sha256
-docker load < rancher-inventory-1.0.0.tar.gz
+sha256sum -c rancher-inventory-1.1.0.tar.gz.sha256
+docker load < rancher-inventory-1.1.0.tar.gz
 
 # 2. Folders and .env as in "Files on the host" and "The .env file"
 sudo chown 10001 /opt/rancher-inventory/data
@@ -485,6 +485,8 @@ docker start rancher-inventory
 ```
 
 Upgrade: load the new image tar, stop and remove the container, and start it again with the same two mounts. On start the app applies any missing database migrations. An older image refuses a database from a newer one with "database schema N is newer than this image".
+
+Upgrading from 1.0.x to 1.1.0 moves the database from schema 4 to schema 6: custom columns (`005`) and cluster members (`006`). Take a backup first; after the upgrade a 1.0.x image can no longer open the database. Members stay "not collected" until [step 5](#step-5-allow-reading-cluster-members-optional) is done and a run completes.
 
 ## Discovery export
 
@@ -576,7 +578,7 @@ Build the image and run it against the dev Rancher. This needs `.env` and `dev/c
 Run these commands from the repo root.
 
 ```bash
-docker build -t rancher-inventory:1.0.0-dev .
+docker build -t rancher-inventory:1.1.0-dev .
 
 mkdir -p dev/data
 docker run -d --name rancher-inventory \
@@ -586,7 +588,7 @@ docker run -d --name rancher-inventory \
   -v $PWD/dev/data:/data \
   -p 8443:8443 \
   --read-only --tmpfs /tmp --cap-drop ALL \
-  rancher-inventory:1.0.0-dev
+  rancher-inventory:1.1.0-dev
 docker logs -f rancher-inventory
 ```
 
