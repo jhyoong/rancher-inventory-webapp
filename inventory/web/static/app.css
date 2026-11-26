@@ -169,6 +169,9 @@ a.badge:hover { border-color: var(--accent); }
   font-variant-numeric: tabular-nums; margin-bottom: 0.15rem;
 }
 
+a.card { display: block; text-decoration: none; }
+a.card:hover, a.card:focus-visible { border-color: var(--accent); }
+
 /* Charts */
 .charts { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 32rem), 1fr)); gap: 1rem; margin-bottom: 1rem; align-items: start; }
 .chart {
