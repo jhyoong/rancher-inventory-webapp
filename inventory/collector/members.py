@@ -15,7 +15,6 @@ _MGMT = "/apis/management.cattle.io/v3"
 CRTB_PATH = f"{_MGMT}/clusterroletemplatebindings"
 PRTB_PATH = f"{_MGMT}/projectroletemplatebindings"
 PROJECT_PATH = f"{_MGMT}/projects"
-ROLETEMPLATE_PATH = f"{_MGMT}/roletemplates"
 
 _CN = re.compile(r"(?:^|[,/])CN=((?:\\.|[^,])+)", re.IGNORECASE)
 
@@ -116,7 +115,9 @@ def build_members(
     role_names: dict[str, str] = {}
     for rt in roletemplates:
         try:
-            role_names[rt["metadata"]["name"]] = rt.get("displayName") or rt["metadata"]["name"]
+            # /v3 (Norman) shape: id + name (the display name); k8s shape: metadata.name + displayName.
+            key = rt["id"] if "id" in rt else rt["metadata"]["name"]
+            role_names[key] = rt.get("displayName") or rt.get("name") or key
         except (KeyError, TypeError, AttributeError) as e:
             log.warning("skipped malformed roletemplate: %r", e)
 
@@ -215,7 +216,7 @@ async def read_members(client: RancherClient) -> MembersResult:
         crtbs = await client.list_kind("local", CRTB_PATH)
         prtbs = await client.list_kind("local", PRTB_PATH)
         projects = await client.list_kind("local", PROJECT_PATH)
-        roletemplates = await client.list_kind("local", ROLETEMPLATE_PATH)
+        roletemplates = await client.list_roletemplates()
         users = await client.list_users()
         self_id = (await client.me()).get("id")
     except RancherError as e:

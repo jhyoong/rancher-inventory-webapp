@@ -4,7 +4,7 @@ A web app that keeps a daily inventory of every downstream cluster managed by on
 
 The full design is in [Rancher Inventory Tool Implementation Plan (single image, airgap).md](<Rancher Inventory Tool Implementation Plan (single image, airgap).md>).
 
-Status: version 1.1.0. Plans 1 and 2, the migration views, migration tracking, custom columns and cluster members are built and tested on the dev Mac against the dev Rancher, in Docker, including a restore and an upgrade drill. The `linux/amd64` image is built for the airgap; the install on the airgap host itself is not done yet (see [Airgap install](#airgap-install)).
+Status: version 1.1.1. Plans 1 and 2, the migration views, migration tracking, custom columns and cluster members are built and tested on the dev machine against the dev Rancher, in Docker, including a restore and an upgrade drill. The `linux/amd64` image is built for the airgap; the install on the airgap host itself is not done yet (see [Airgap install](#airgap-install)).
 
 ## Contents
 
@@ -21,7 +21,7 @@ Status: version 1.1.0. Plans 1 and 2, the migration views, migration tracking, c
 11. [Rules for networking and databases](#rules-for-networking-and-databases)
 12. [Known behaviour](#known-behaviour)
 13. [Dev cluster notes](#dev-cluster-notes)
-14. [Run on the dev Mac](#run-on-the-dev-mac)
+14. [Run on the dev machine](#run-on-the-dev-machine)
 
 ## What you need
 
@@ -229,6 +229,8 @@ The Members list on each cluster page (and the Members column and member filter)
 
 The rule needs `clusterroletemplatebindings`, `projectroletemplatebindings`, `projects` and `roletemplates` to read who has access and with which role. It also needs `users`, so that `/v3/users` lists other users' names. Without `users`, `/v3/users` returns only the service user itself. The app reads only `/v3/users`. It never reads the raw User objects.
 
+The app reads the namespaced bindings and projects through the local-cluster proxy (`/k8s/clusters/local/...`). It reads role templates from `/v3/roletemplates`. Role templates are global objects, and Rancher honours a GlobalRole rule for them only on `/v3`. The same rule gets a 403 through the proxy.
+
 If you used option A in step 3, add this rule to the `inventory-reader-global` GlobalRole. No new binding is needed:
 
 ```yaml
@@ -295,6 +297,8 @@ curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $TOKEN" \
 # 4. Optional (step 5): members can be read (expect 200)
 curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $TOKEN" \
   "$RANCHER/k8s/clusters/local/apis/management.cattle.io/v3/clusterroletemplatebindings?limit=1"
+curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $TOKEN" \
+  "$RANCHER/v3/roletemplates?limit=1"
 ```
 
 Add `--cacert /path/to/ca.pem` if Rancher uses a private CA.
@@ -413,7 +417,7 @@ cd /opt/rancher-inventory
 
 # 1. Check URLs, tokens, CA files and RBAC for every site
 docker run --rm --env-file .env -v $PWD/config:/config:ro \
-  rancher-inventory:1.1.0 check-config
+  rancher-inventory:1.1.1 check-config
 
 # 2. Run
 docker run -d --name rancher-inventory --restart unless-stopped \
@@ -422,7 +426,7 @@ docker run -d --name rancher-inventory --restart unless-stopped \
   -v $PWD/data:/data \
   -p 8443:8443 \
   --read-only --tmpfs /tmp --cap-drop ALL \
-  rancher-inventory:1.1.0
+  rancher-inventory:1.1.1
 ```
 
 `check-config` reports for each site: URL reachable and TLS trusted, token valid and days to expiry, number of clusters visible, and which kinds return 403 on one sample cluster. Fix any 403 by adding the missing rule to the RoleTemplate.
@@ -438,10 +442,10 @@ The image tar is built on a connected machine and carried across. Nothing is dow
 The build installs exactly the package versions in `uv.lock`, checked by hash. Build for the CPU architecture of the airgap VM (`linux/amd64` here; use `linux/arm64` if `uname -m` on the VM prints `aarch64`).
 
 ```bash
-docker buildx build --platform linux/amd64 -t rancher-inventory:1.1.0 --load .
+docker buildx build --platform linux/amd64 -t rancher-inventory:1.1.1 --load .
 mkdir -p dist
-docker save rancher-inventory:1.1.0 | gzip > dist/rancher-inventory-1.1.0.tar.gz
-(cd dist && shasum -a 256 rancher-inventory-1.1.0.tar.gz > rancher-inventory-1.1.0.tar.gz.sha256)
+docker save rancher-inventory:1.1.1 | gzip > dist/rancher-inventory-1.1.1.tar.gz
+(cd dist && shasum -a 256 rancher-inventory-1.1.1.tar.gz > rancher-inventory-1.1.1.tar.gz.sha256)
 ```
 
 Carry across: the tar, its `.sha256` file, `config/sites.yaml`, any CA and TLS files, and `deploy/` if you use the extended role. Do not carry `.env`; write it on the airgap host.
@@ -453,8 +457,8 @@ Carry across: the tar, its `.sha256` file, `config/sites.yaml`, any CA and TLS f
 curl -m 5 https://pypi.org
 
 # 1. Verify and load the image
-sha256sum -c rancher-inventory-1.1.0.tar.gz.sha256
-docker load < rancher-inventory-1.1.0.tar.gz
+sha256sum -c rancher-inventory-1.1.1.tar.gz.sha256
+docker load < rancher-inventory-1.1.1.tar.gz
 
 # 2. Folders and .env as in "Files on the host" and "The .env file"
 sudo chown 10001 /opt/rancher-inventory/data
@@ -488,6 +492,8 @@ Upgrade: load the new image tar, stop and remove the container, and start it aga
 
 Upgrading from 1.0.x to 1.1.0 moves the database from schema 4 to schema 6: custom columns (`005`) and cluster members (`006`). Take a backup first; after the upgrade a 1.0.x image can no longer open the database. Members stay "not collected" until [step 5](#step-5-allow-reading-cluster-members-optional) is done and a run completes.
 
+Upgrading from 1.1.0 to 1.1.1 needs no schema change. 1.1.1 reads role templates from `/v3/roletemplates`, so the members rule from step 5 works when granted through a GlobalRole.
+
 ## Discovery export
 
 `/export/discovery` (admins) or `inventory export-discovery --out /data/export` builds a `tar.gz` with the same per-cluster CSV files and column names as `k8s-discovery.sh` 1.0.0, plus `fleet_summary.csv`. Names are hashed with `EXPORT_SALT`; the same salt gives the same hashes as the script. Before the file is offered, a self-check looks for IPv4 addresses, the `EXPORT_SENSITIVE_STRINGS`, and real cluster, node, namespace and workload names in the hashed columns. Any hit blocks the download and lists the file and column. The hash-to-name map is stored in the database and downloaded separately from `/export/discovery/name-map.csv`; it is never in the bundle.
@@ -515,7 +521,7 @@ The pages are built for planning a move from VMware and NSX to Nutanix NKP.
 - **Members**: the Rancher members of each cluster (users and groups, with their roles and project scopes). The `/clusters` list has a Members column and a member filter, and the cluster page has a Members section. Needs [step 5](#step-5-allow-reading-cluster-members-optional); without it members show "not collected".
 - **Old URLs** `/inventory`, `/helm`, `/crds`, `/annotations` and `/namespaces` redirect (307) to the new pages and keep the query string, so saved links still work.
 
-`tests/fixtures/real/` holds fixtures from real clusters. It is git-ignored and exists only on the dev Mac. Tests that need it are skipped when it is missing ("P2 fixtures missing").
+`tests/fixtures/real/` holds fixtures from real clusters. It is git-ignored and exists only on the dev machine. Tests that need it are skipped when it is missing ("P2 fixtures missing").
 
 ## Rules for networking and databases
 
@@ -549,13 +555,13 @@ To extend a list, copy `config/defaults/rules.yaml` to `config/rules.yaml` and e
 
 ## Dev cluster notes
 
-The dev Rancher server at `192.168.50.210`:
+The dev Rancher server (`<dev-rancher-ip>` below stands for its private IP):
 
 - Rancher v2.14.0, served by ingress-nginx under the hostname `rancher.local`. Requests to the bare IP return 404.
-- `rancher.local` does not resolve from the dev Mac. Add it to `/etc/hosts`:
+- `rancher.local` does not resolve from the dev machine. Add it to `/etc/hosts`:
 
   ```
-  192.168.50.210 rancher.local
+  <dev-rancher-ip> rancher.local
   ```
 
 - The ingress serves its self-signed placeholder certificate (`Kubernetes Ingress Controller Fake Certificate`, SAN `ingress.local`). It does not match `rancher.local`, so a `ca_file` alone will not make TLS verify. The dev site therefore uses `tls_verify: false`. This is for dev only. Fix it on the cluster by giving the Rancher ingress a certificate for `rancher.local`.
@@ -571,29 +577,29 @@ sites:
     token_expires: 2027-02-10
 ```
 
-## Run on the dev Mac
+## Run on the dev machine
 
 Build the image and run it against the dev Rancher. This needs `.env` and `dev/config/sites.yaml` in the repo.
 
 Run these commands from the repo root.
 
 ```bash
-docker build -t rancher-inventory:1.1.0-dev .
+docker build -t rancher-inventory:1.1.1-dev .
 
 mkdir -p dev/data
 docker run -d --name rancher-inventory \
   --env-file .env \
-  --add-host rancher.local:192.168.50.210 \
+  --add-host rancher.local:<dev-rancher-ip> \
   -v $PWD/dev/config:/config:ro \
   -v $PWD/dev/data:/data \
   -p 8443:8443 \
   --read-only --tmpfs /tmp --cap-drop ALL \
-  rancher-inventory:1.1.0-dev
+  rancher-inventory:1.1.1-dev
 docker logs -f rancher-inventory
 ```
 
 - The log shows the first admin being created and a first run starting when there is no good run yet.
-- If `/data` is not writable, run `chmod 777 dev/data`. Docker Desktop on macOS maps ownership. This is for dev only.
+- If `/data` is not writable, run `chmod 777 dev/data`. Some Docker setups map volume ownership differently. This is for dev only.
 - Check health after about a minute: `docker inspect --format '{{.State.Health.Status}}' rancher-inventory` should print `healthy`.
 - Open `http://localhost:8443` and log in with `ADMIN_USER` and `ADMIN_PASSWORD` from `.env`.
 - Stop and remove: `docker rm -f rancher-inventory`. The data stays in `dev/data`.

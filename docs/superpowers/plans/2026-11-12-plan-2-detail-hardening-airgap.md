@@ -24,7 +24,7 @@
 
 ## State after plan 1 (merged to main 2026-11-12)
 
-- 189 tests pass; live tests read the dev Rancher (`rancher.local` must be in `/etc/hosts`; on the Mac each new connection costs about 5 s for the `.local` lookup, so reuse one client per test session).
+- 189 tests pass; live tests read the dev Rancher (`rancher.local` must be in `/etc/hosts`; on some dev machines each new connection costs about 5 s for the `.local` lookup, so reuse one client per test session).
 - Real module names to build on: `inventory/rancher/client.py` (`RancherClient`, `RancherError`), `inventory/collector/{transform,cluster,runner,thread,classify,rules,annotations,addresses,units,kinds}.py`, `inventory/db/{connection,migrate,repo}.py`, `inventory/web/{app,deps,auth,queries}.py`, routes in `inventory/web/routes/` (one module per page group), templates in `inventory/web/templates/`.
 - Test fixtures in `tests/conftest.py`: `settings`, `dev_site`, `db`, `db_path`, `dev_live`, `dev_clusters`, `local_cluster`, `live_loop`, `live_client`, `kinds`, `dev_lists`, `collected_db` (session tmp DB after one real run), `client`, `admin_client`, `viewer_client`, `admin_client_collected`.
 - `transform.trim` stores keep paths nested in `data`; derived fields use the `_DERIVE` table in `transform.py`. New derive helpers in this plan register there.
@@ -39,7 +39,7 @@
 These come from the user. Tasks that need them say so.
 
 1. **`k8s-discovery.sh` 1.0.0** in `reference/k8s-discovery.sh`. Done (committed). Tasks 4, 7 and 8 copy its CSV file names, column names and hashing rules from it.
-2. **An admin kubeconfig for the dev `local` cluster** (download from Rancher), used only on the dev Mac to run the script with `--clear-names` and to run `helm list -A` for comparison. Not used by the app.
+2. **An admin kubeconfig for the dev `local` cluster** (download from Rancher), used only on the dev machine to run the script with `--clear-names` and to run `helm list -A` for comparison. Not used by the app.
 3. **Airgap test host details:** CPU architecture, Docker or Podman, how files are carried across.
 
 ## Review Focus
@@ -382,7 +382,7 @@ def test_platform_page(admin_client_collected):  # /platform contains "rancher.c
 - [ ] **Step 1: Write the failing tests**
 
 ```python
-@pytest.mark.parametrize("f", [{"service_type": "LoadBalancer"}, {"address": "192.168.50."},
+@pytest.mark.parametrize("f", [{"service_type": "LoadBalancer"}, {"address": "<dev-subnet-prefix>."},
                                {"helm_chart": "cert-manager"}, {"class": "<class of local>"}])
 def test_new_filters_find_local(collected_db, f): ...
 def test_csv_on_every_page(admin_client_collected):  # each page with ?format=csv -> text/csv, header row present
