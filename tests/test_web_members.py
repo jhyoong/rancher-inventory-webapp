@@ -16,7 +16,7 @@ def _seed(web_settings):
                          (cid, "n-" + cid, status, at))
 
         def member(cid, kind, subject, name, username, disabled, grants, ord_):
-            conn.execute("INSERT INTO cluster_members VALUES ('dev',?,?,?,?,?,?,?,?)",
+            conn.execute("INSERT INTO cluster_members VALUES ('dev',?,?,?,?,?,?,?,?,NULL)",
                          (cid, kind, subject, name, username, disabled, json.dumps(grants), ord_))
 
         own = [{"role": "Cluster Owner", "template": "cluster-owner", "scope": "cluster"}]
@@ -112,8 +112,8 @@ def test_member_filter_casefolds_non_ascii(admin_client, web_settings):
     try:
         conn.execute("INSERT INTO clusters (site, cluster_id, name, members_status, members_at) VALUES ('dev','k1','n-k1','ok',?)", (T0,))
         conn.execute("INSERT INTO clusters (site, cluster_id, name, members_status, members_at) VALUES ('dev','k2','n-k2','ok',?)", (T0,))
-        conn.execute("INSERT INTO cluster_members VALUES ('dev','k1','user','u-1',?,?,0,'[]',0)", ("ÖSTERBERG", "oster"))
-        conn.execute("INSERT INTO cluster_members VALUES ('dev','k2','user','u-2','Plain','plain',0,'[]',0)")
+        conn.execute("INSERT INTO cluster_members VALUES ('dev','k1','user','u-1',?,?,0,'[]',0,NULL)", ("ÖSTERBERG", "oster"))
+        conn.execute("INSERT INTO cluster_members VALUES ('dev','k2','user','u-2','Plain','plain',0,'[]',0,NULL)")
     finally:
         conn.close()
     body = admin_client.get("/clusters?member=österberg").text

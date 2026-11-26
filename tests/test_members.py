@@ -307,3 +307,23 @@ def test_list_roletemplates_uses_v3(monkeypatch):
     rts = asyncio.run(c.list_roletemplates())
     assert [r["id"] for r in rts] == ["cluster-owner"]
     assert calls[0][0] == "/v3/roletemplates"
+
+
+def test_user_principal_prefers_binding_then_sorted_external_ids():
+    from inventory.collector.members import user_principal
+    ad = "activedirectory_user://CN=Carol,DC=y"
+    assert user_principal(None, ad) == ad
+    assert user_principal({"principalIds": ["local://u-1", "openldap_user://z", ad]}, "local://u-1") == ad
+    assert user_principal({"principalIds": ["local://u-1", "system://x"]}, None) is None
+    assert user_principal(None, None) is None
+
+
+def test_members_carry_ad_principal():
+    users = USERS + [{"id": "u-ad", "username": "carol", "name": "Carol",
+                      "principalIds": ["local://u-ad", "activedirectory_user://CN=Carol,DC=y"], "enabled": True}]
+    out = build([crtb("a", "c-1", "x", userName="u-ad"), crtb("b", "c-1", "x", userName="u-alice"),
+                 crtb("g", "c-1", "x", groupPrincipalName="activedirectory_group://CN=Ops,DC=x")], users=users)
+    by = {m.subject: m for m in out["c-1"]}
+    assert by["u-ad"].principal == "activedirectory_user://CN=Carol,DC=y"
+    assert by["u-alice"].principal is None
+    assert by["activedirectory_group://CN=Ops,DC=x"].principal is None

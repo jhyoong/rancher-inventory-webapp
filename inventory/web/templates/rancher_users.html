@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% from "_rancher_user.html" import user_href, principal_cell %}
+{% block title %}Rancher users - Rancher inventory{% endblock %}
+{% block content %}
+<h1>Rancher users</h1>
+<p>Users who are members of at least one downstream cluster, on every site. <strong>Users are matched across sites by AD principal.</strong>
+Local accounts, and users whose clusters have not been collected since the upgrade that added this page, have no AD principal: they are listed once per site and marked <em>local / unmatched</em>.</p>
+<p class="muted">Groups are not listed. Rancher global admins can also access every cluster. Only clusters whose members were collected are counted; a stale list (last read failed) still counts.</p>
+<form method="get" action="/rancher-users">
+  <label>User <input name="q" value="{{ f.q }}" placeholder="name, username or principal"></label>
+  <label>Site <select name="site"><option value="">any</option>
+    {% for s in sites %}<option {% if f.site == s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></label>
+  <button type="submit">Filter</button>
+</form>
+{% if users %}
+<p>{{ users | length }} user{{ "" if users | length == 1 else "s" }}.</p>
+<table>
+  <thead><tr><th>Name</th><th>Username</th><th>AD principal</th><th>Clusters</th><th>Sites</th><th>Disabled</th></tr></thead>
+  <tbody>
+  {% for u in users %}
+  <tr><td><a href="{{ user_href(u) }}">{{ u.name }}</a>{% if u.other_names %}<br><span class="muted">also: {{ u.other_names | join(", ") }}</span>{% endif %}</td>
+      <td>{{ u.usernames | join(", ") }}</td>
+      <td>{{ principal_cell(u) }}</td>
+      <td>{{ u.clusters }}</td>
+      <td>{{ u.sites | length }} <span class="muted">({{ u.sites | join(", ") }})</span></td>
+      <td>{{ u.disabled }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% elif f.q or f.site %}
+<p>No Rancher users match.</p>
+{% else %}
+<p>No cluster members collected yet. To collect them, follow the README step "Allow reading cluster members" (#step-5-allow-reading-cluster-members-optional).</p>
+{% endif %}
+{% endblock %}

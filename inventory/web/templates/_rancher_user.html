@@ -1,0 +1,3 @@
+{# link to one Rancher user's page: by principal when matched, else by site and Rancher user id #}
+{% macro user_href(u) %}{% if u.matched %}/rancher-users/user?p={{ u.principal | urlencode }}{% else %}/rancher-users/user?site={{ u.site | urlencode }}&amp;id={{ u.subject | urlencode }}{% endif %}{% endmacro %}
+{% macro principal_cell(u) %}{% if u.matched %}<code>{{ u.principal }}</code>{% else %}<span class="muted">local / unmatched ({{ u.site }})</span>{% endif %}{% endmacro %}

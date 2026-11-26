@@ -35,7 +35,7 @@ def test_upgrade_v1_to_v2_keeps_data(tmp_path, collected_db, open_db):
     metrics = conn.execute("SELECT count(*) FROM cluster_metrics").fetchone()[0]
     assert metrics >= 1
 
-    assert migrate(conn) == SCHEMA_VERSION == 6
+    assert migrate(conn) == SCHEMA_VERSION == 7
     assert [u.username for u in list_users(conn)] == ["keep"]
     assert conn.execute("SELECT count(*) FROM presets").fetchone()[0] == 1
     assert conn.execute("SELECT count(*) FROM cluster_metrics").fetchone()[0] == metrics
@@ -67,7 +67,7 @@ def test_upgrade_v2_to_v3_keeps_data(tmp_path, collected_db, open_db):
     metrics = conn.execute("SELECT count(*) FROM cluster_metrics").fetchone()[0]
     assert metrics >= 1
 
-    assert migrate(conn) == SCHEMA_VERSION == 6
+    assert migrate(conn) == SCHEMA_VERSION == 7
     assert [u.username for u in list_users(conn)] == ["keep"]
     assert conn.execute("SELECT count(*) FROM presets").fetchone()[0] == 1
     assert conn.execute("SELECT count(*) FROM cluster_metrics").fetchone()[0] == metrics

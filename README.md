@@ -4,7 +4,7 @@ A web app that keeps a daily inventory of every downstream cluster managed by on
 
 The full design is in [Rancher Inventory Tool Implementation Plan (single image, airgap).md](<Rancher Inventory Tool Implementation Plan (single image, airgap).md>).
 
-Status: version 1.1.1. Plans 1 and 2, the migration views, migration tracking, custom columns and cluster members are built and tested on the dev machine against the dev Rancher, in Docker, including a restore and an upgrade drill. The `linux/amd64` image is built for the airgap; the install on the airgap host itself is not done yet (see [Airgap install](#airgap-install)).
+Status: version 1.2.0. Plans 1 and 2, the migration views, migration tracking, custom columns and cluster members are built and tested on the dev machine against the dev Rancher, in Docker, including a restore and an upgrade drill. The Rancher users page (1.2.0) is covered by offline tests only so far. The `linux/amd64` image is built for the airgap; the install on the airgap host itself is not done yet (see [Airgap install](#airgap-install)).
 
 ## Contents
 
@@ -225,7 +225,7 @@ userName: u-abc12
 
 ### Step 5. Allow reading cluster members (optional)
 
-The Members list on each cluster page (and the Members column and member filter) comes from the Rancher role bindings on the Rancher local cluster. This step is optional. Without it, members show "not collected".
+The Members list on each cluster page (and the Members column, the member filter and the **Rancher users** page) comes from the Rancher role bindings on the Rancher local cluster. This step is optional. Without it, members show "not collected".
 
 The rule needs `clusterroletemplatebindings`, `projectroletemplatebindings`, `projects` and `roletemplates` to read who has access and with which role. It also needs `users`, so that `/v3/users` lists other users' names. Without `users`, `/v3/users` returns only the service user itself. The app reads only `/v3/users`. It never reads the raw User objects.
 
@@ -417,7 +417,7 @@ cd /opt/rancher-inventory
 
 # 1. Check URLs, tokens, CA files and RBAC for every site
 docker run --rm --env-file .env -v $PWD/config:/config:ro \
-  rancher-inventory:1.1.1 check-config
+  rancher-inventory:1.2.0 check-config
 
 # 2. Run
 docker run -d --name rancher-inventory --restart unless-stopped \
@@ -426,7 +426,7 @@ docker run -d --name rancher-inventory --restart unless-stopped \
   -v $PWD/data:/data \
   -p 8443:8443 \
   --read-only --tmpfs /tmp --cap-drop ALL \
-  rancher-inventory:1.1.1
+  rancher-inventory:1.2.0
 ```
 
 `check-config` reports for each site: URL reachable and TLS trusted, token valid and days to expiry, number of clusters visible, and which kinds return 403 on one sample cluster. Fix any 403 by adding the missing rule to the RoleTemplate.
@@ -442,10 +442,10 @@ The image tar is built on a connected machine and carried across. Nothing is dow
 The build installs exactly the package versions in `uv.lock`, checked by hash. Build for the CPU architecture of the airgap VM (`linux/amd64` here; use `linux/arm64` if `uname -m` on the VM prints `aarch64`).
 
 ```bash
-docker buildx build --platform linux/amd64 -t rancher-inventory:1.1.1 --load .
+docker buildx build --platform linux/amd64 -t rancher-inventory:1.2.0 --load .
 mkdir -p dist
-docker save rancher-inventory:1.1.1 | gzip > dist/rancher-inventory-1.1.1.tar.gz
-(cd dist && shasum -a 256 rancher-inventory-1.1.1.tar.gz > rancher-inventory-1.1.1.tar.gz.sha256)
+docker save rancher-inventory:1.2.0 | gzip > dist/rancher-inventory-1.2.0.tar.gz
+(cd dist && shasum -a 256 rancher-inventory-1.2.0.tar.gz > rancher-inventory-1.2.0.tar.gz.sha256)
 ```
 
 Carry across: the tar, its `.sha256` file, `config/sites.yaml`, any CA and TLS files, and `deploy/` if you use the extended role. Do not carry `.env`; write it on the airgap host.
@@ -457,8 +457,8 @@ Carry across: the tar, its `.sha256` file, `config/sites.yaml`, any CA and TLS f
 curl -m 5 https://pypi.org
 
 # 1. Verify and load the image
-sha256sum -c rancher-inventory-1.1.1.tar.gz.sha256
-docker load < rancher-inventory-1.1.1.tar.gz
+sha256sum -c rancher-inventory-1.2.0.tar.gz.sha256
+docker load < rancher-inventory-1.2.0.tar.gz
 
 # 2. Folders and .env as in "Files on the host" and "The .env file"
 sudo chown 10001 /opt/rancher-inventory/data
@@ -493,6 +493,12 @@ Upgrade: load the new image tar, stop and remove the container, and start it aga
 Upgrading from 1.0.x to 1.1.0 moves the database from schema 4 to schema 6: custom columns (`005`) and cluster members (`006`). Take a backup first; after the upgrade a 1.0.x image can no longer open the database. Members stay "not collected" until [step 5](#step-5-allow-reading-cluster-members-optional) is done and a run completes.
 
 Upgrading from 1.1.0 to 1.1.1 needs no schema change. 1.1.1 reads role templates from `/v3/roletemplates`, so the members rule from step 5 works when granted through a GlobalRole.
+
+Upgrading from 1.1.x to 1.2.0 moves the database from schema 6 to schema 7 (`007`). Take a backup first; after the upgrade a 1.1.x image can no longer open the database. Each user member now also stores its AD principal, which the **Rancher users** page uses to match one person across sites. Members collected before the upgrade have no principal, so they show as "local / unmatched" until the next run completes. No new Rancher permission is needed.
+
+## Rancher users
+
+**Rancher users** lists every user who is a member of at least one downstream cluster, on all sites, with the number of clusters and sites each can access; click a user for their clusters, roles and scope. Users are matched across sites by AD principal (the first non-`local://` principal of the Rancher user). Local accounts have none and are listed once per site. Groups are not listed, and access through Rancher global roles (for example global admins) is not counted. Clusters whose members were never collected are not counted; a stale list (last member read failed) still counts and is marked on the user page.
 
 ## Discovery export
 
@@ -584,7 +590,7 @@ Build the image and run it against the dev Rancher. This needs `.env` and `dev/c
 Run these commands from the repo root.
 
 ```bash
-docker build -t rancher-inventory:1.1.1-dev .
+docker build -t rancher-inventory:1.2.0-dev .
 
 mkdir -p dev/data
 docker run -d --name rancher-inventory \
@@ -594,7 +600,7 @@ docker run -d --name rancher-inventory \
   -v $PWD/dev/data:/data \
   -p 8443:8443 \
   --read-only --tmpfs /tmp --cap-drop ALL \
-  rancher-inventory:1.1.1-dev
+  rancher-inventory:1.2.0-dev
 docker logs -f rancher-inventory
 ```
 

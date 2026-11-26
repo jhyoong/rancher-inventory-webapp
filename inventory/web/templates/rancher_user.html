@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% from "_rancher_user.html" import principal_cell %}
+{% block title %}{{ u.name }} - Rancher users - Rancher inventory{% endblock %}
+{% block content %}
+<p><a href="/rancher-users">&larr; Rancher users</a></p>
+<h1>{{ u.name }}</h1>
+<dl>
+  {% if u.other_names %}<dt>Also named</dt><dd>{{ u.other_names | join(", ") }}</dd>{% endif %}
+  <dt>Username</dt><dd>{{ u.usernames | join(", ") or "-" }}</dd>
+  <dt>AD principal</dt><dd>{{ principal_cell(u) }}</dd>
+  <dt>Clusters</dt><dd>{{ u.clusters }} on {{ u.sites | length }} site{{ "" if u.sites | length == 1 else "s" }} ({{ u.sites | join(", ") }})</dd>
+  <dt>Disabled</dt><dd>{{ u.disabled }}</dd>
+</dl>
+{% if u.matched %}<p class="muted">Matched across sites by AD principal.</p>
+{% else %}<p class="muted">This user has no AD principal (a local account, or its clusters have not been collected since the upgrade that added this page), so only site {{ u.site }} is shown.</p>{% endif %}
+<table>
+  <thead><tr><th>Site</th><th>Cluster</th><th>Roles</th><th>Scope</th></tr></thead>
+  <tbody>
+  {% for c in u.cluster_rows %}
+  <tr><td>{{ c.site }}</td>
+      <td><a href="/clusters/{{ c.site }}/{{ c.cluster_id }}#members">{{ c.cluster_name }}</a>{% if c.stale %} <span class="warn" title="the last member read failed; this is the earlier list">(stale)</span>{% endif %}{% if c.disabled %} <span class="muted">(disabled)</span>{% endif %}</td>
+      <td>{% for g in c.grants %}{{ g.role }}{% if not loop.last %}<br>{% endif %}{% endfor %}</td>
+      <td>{% for g in c.grants %}{{ g.scope }}{% if not loop.last %}<br>{% endif %}{% endfor %}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p class="muted">Rancher global admins can also access every cluster.</p>
+{% endblock %}

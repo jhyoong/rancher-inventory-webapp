@@ -253,11 +253,11 @@ def write_members(conn: sqlite3.Connection, site: str, cluster_id: str, result, 
         if result.status == "ok":
             conn.execute("DELETE FROM cluster_members WHERE site=? AND cluster_id=?", key)
             conn.executemany(
-                "INSERT INTO cluster_members (site, cluster_id, kind, subject, display_name, username, disabled, grants, ord) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO cluster_members (site, cluster_id, kind, subject, display_name, username, disabled, grants, ord, principal) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [
                     (site, cluster_id, m.kind, m.subject, m.display_name, m.username,
-                     1 if m.disabled else 0, json.dumps(m.grants), i)
+                     1 if m.disabled else 0, json.dumps(m.grants), i, m.principal)
                     for i, m in enumerate(result.clusters.get(cluster_id, []))
                 ],
             )  # fmt: skip
