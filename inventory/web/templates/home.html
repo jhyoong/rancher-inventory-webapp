@@ -5,7 +5,6 @@
 <h1>Overview</h1>
 {{ site_refresh(site_names) }}
 <form method="get" action="/">
-  <input type="hidden" name="view" value="{{ view }}">
   {% if scope == "all" %}<input type="hidden" name="scope" value="all">{% endif %}
   <label>Site <select name="site" onchange="this.form.submit()"><option value="">all sites</option>
     {% for s in site_names %}<option {% if site == s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></label>
@@ -19,7 +18,7 @@
   <div class="card"><div class="num">{{ (t.mem_alloc_b | gib) if t.mem_alloc_b else "not available" }}</div>GiB memory allocatable</div>
   <div class="card"><div class="num">{{ t.pv_count }}</div>Persistent volumes{% if t.pv_count %} ({{ t.pv_bytes | size }}){% endif %}</div>
   <div class="card"><div class="num">{{ t.floating_ips }}</div>Floating IP needs</div>
-  <div class="card"><div class="num">{{ t.special_network_clusters }}</div>Clusters with special network config</div>
+  <a class="card" href="/clusters?flag=special-network-config{% if site %}&amp;site={{ site | urlencode }}{% endif %}"><div class="num">{{ t.special_network_clusters }}</div>Clusters with special network config</a>
 </div>
 <p class="muted">Opt-in collectors: {{ optins | join(", ") if optins else "none active" }}</p>
 <h2>Migration progress</h2>
@@ -53,7 +52,7 @@
 <script src="/static/chart.umd.min.js"></script>
 <script src="/static/overview.js"></script>
 <h2>Clusters</h2>
-{{ cluster_list(data.clusters, view) }}
+{{ cluster_list(data.clusters) }}
 <h2 id="removed">Removed from Rancher</h2>
 {% if removed %}
 <form method="post" action="/migration/bulk" class="bulk-edit">

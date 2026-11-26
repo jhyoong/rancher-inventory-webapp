@@ -78,17 +78,13 @@ def test_external_ip_ignores_control_plane(collected_db, tmp_path, open_db, sett
     assert "external-ip" not in watch_out(conn, rules)[("dev", "local")]
 
 
-def test_clusters_page_table_and_cards(admin_client_collected, dev_lists):
+def test_clusters_page_table(admin_client_collected, dev_lists):
     os_image = dev_lists["nodes"][0]["status"]["nodeInfo"]["osImage"]
     get = admin_client_collected.get
-    table = get("/clusters").text
-    cards = get("/clusters?view=cards").text
-    for text in (table, cards):
-        assert LOCAL_LINK in text and os_image in text and "node-pinned-pv" in text
-    assert "<th>Watch out</th>" in table and CARD not in table
-    assert CARD in cards and "<th>Watch out</th>" not in cards
-    bogus = get("/clusters?view=bogus").text
-    assert "<th>Watch out</th>" in bogus and CARD not in bogus
+    for path in ("/clusters", "/clusters?view=cards"):
+        text = get(path).text
+        assert LOCAL_LINK in text and os_image in text and "node-pinned-pv" in text, path
+        assert "<th>Watch out</th>" in text and CARD not in text, path
 
 
 def test_flag_filter_old_and_new(admin_client_collected, collected_db, open_db, dev_lists):
@@ -199,7 +195,7 @@ def test_home_page(admin_client_collected):
     other = admin_client_collected.get("/?site=other")
     assert other.status_code == 200
     assert "No clusters match." in other.text
-    assert CARD in admin_client_collected.get("/?view=cards").text
+    assert CARD not in admin_client_collected.get("/?view=cards").text
 
 
 def test_node_groups_dev(collected_db, open_db, dev_lists):
@@ -307,7 +303,7 @@ def test_watch_out_flags_link_to_rows(admin_client_collected):
     get = admin_client_collected.get
     anchor = FLAG_ANCHORS["node-pinned-pv"]
     link = f'href="/clusters/dev/local#{anchor}">node-pinned-pv</a>'
-    for page in ("/clusters", "/clusters?view=cards", "/clusters/dev/local"):
+    for page in ("/clusters", "/clusters/dev/local"):
         assert link in get(page).text, page
     page = get("/clusters/dev/local").text
     assert f'id="{anchor}"' in page
@@ -330,9 +326,6 @@ def test_never_collected_shows_not_collected(collected_db, tmp_path, open_db):
         cells = re.findall(r"<td[^>]*>(.*?)</td>", row, re.S)
         # cells after the cluster cell: Kubernetes, Nodes, Pools, OS, vCPU, Memory, PVs, Floating IPs, LB, Watch out
         assert cells[-4:] == ["not collected"] * 4, cells
-        cards = c.get("/clusters?view=cards").text
-        for label in ("PVs", "Floating IPs", "LB", "Watch out"):
-            assert f"<dt>{label}</dt><dd>not collected</dd>" in cards, label
         rows = list(csv.DictReader(io.StringIO(c.get("/clusters?format=csv").text)))
         local = next(r for r in rows if r["cluster_id"] == "local")
         for k in ("pv_count", "pv_bytes", "floating_total", "floating_lb", "lb_implementations", "flags"):

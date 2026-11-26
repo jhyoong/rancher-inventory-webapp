@@ -1,4 +1,23 @@
 (function () {
+  // "240 rows", or "12 of 240 rows shown" while the filter box has text
+  function countText(shown, total, filtering) {
+    if (filtering) return shown + " of " + total + " rows shown";
+    return total + (total === 1 ? " row" : " rows");
+  }
+
+  // q is lower case; col -1 matches the whole row, else only that cell (a missing cell never matches)
+  function matches(cellTexts, q, col) {
+    if (q === "") return true;
+    var text = col === -1 ? cellTexts.join(" ") : cellTexts[col];
+    return text !== undefined && text.toLowerCase().indexOf(q) !== -1;
+  }
+
+  // under Node (tests) only the helpers above are exported
+  if (typeof document === "undefined") {
+    module.exports = { countText: countText, matches: matches };
+    return;
+  }
+
   // Sizes as shown by the app (KiB, MiB) and as Kubernetes quantities (Ki, Mi, k, M), all in bytes.
   var UNITS = { "": 1, Ki: Math.pow(1024, 1), Mi: Math.pow(1024, 2), Gi: Math.pow(1024, 3), Ti: Math.pow(1024, 4),
                 Pi: Math.pow(1024, 5), Ei: Math.pow(1024, 6), k: 1e3, M: 1e6, G: 1e9, T: 1e12, P: 1e15, E: 1e18 };
@@ -59,16 +78,47 @@
     th.setAttribute("aria-sort", asc ? "ascending" : "descending");
   }
 
-  function addFilter(table) {
+  function cellTexts(row) {
+    return Array.prototype.map.call(row.cells, function (c) { return c.textContent; });
+  }
+
+  // the "240 rows" line under the table; returns a function that refreshes it
+  function addCount(table) {
+    var p = document.createElement("p");
+    p.className = "table-count";
+    p.setAttribute("aria-live", "polite");
+    table.parentNode.insertBefore(p, table.nextSibling);
+    var update = function (filtering) {
+      var all = groups(table);
+      var shown = all.filter(function (g) { return !g.row.hidden; }).length;
+      p.textContent = countText(shown, all.length, filtering);
+    };
+    update(false);
+    return update;
+  }
+
+  function addFilter(table, headers) {
+    var bar = document.createElement("div");
+    bar.className = "table-filter";
     var input = document.createElement("input");
     input.type = "search";
-    input.className = "table-filter";
     input.placeholder = "Filter rows";
     input.setAttribute("aria-label", "Filter rows");
-    input.addEventListener("input", function () {
+    var select = document.createElement("select");
+    select.setAttribute("aria-label", "Filter column");
+    select.add(new Option("All columns", "-1"));
+    headers.forEach(function (th, col) {
+      var name = th.textContent.trim();
+      if (name) select.add(new Option(name, String(col)));
+    });
+    bar.appendChild(input);
+    bar.appendChild(select);
+    var count = addCount(table);
+    var apply = function () {
       var q = input.value.toLowerCase();
+      var col = parseInt(select.value, 10);
       groups(table).forEach(function (g) {
-        g.row.hidden = q !== "" && g.row.textContent.toLowerCase().indexOf(q) === -1;
+        g.row.hidden = !matches(cellTexts(g.row), q, col);
         g.extras.forEach(function (e) { e.hidden = g.row.hidden; });
         // a hidden row must not be submitted by a bulk edit
         if (g.row.hidden) {
@@ -83,12 +133,15 @@
             return g.row.hidden || !c || c.checked;
           });
       }
-    });
+      count(q !== "");
+    };
+    input.addEventListener("input", apply);
+    select.addEventListener("change", apply);
     // the table can sit inside a form (bulk edit): Enter in the filter must not submit it
     input.addEventListener("keydown", function (e) {
       if (e.key === "Enter") e.preventDefault();
     });
-    table.parentNode.insertBefore(input, table);
+    table.parentNode.insertBefore(bar, table);
   }
 
   function setup(table) {
@@ -108,7 +161,8 @@
         if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); }
       });
     });
-    if (groups(table).length > 10) addFilter(table);
+    if (groups(table).length > 10) addFilter(table, headers);
+    else if (table.hasAttribute("data-count")) addCount(table);
   }
 
   // "Select all shown": ticks or unticks the row checkboxes of its table that the row filter does not hide.

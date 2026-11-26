@@ -6,7 +6,6 @@
 {% block content %}
 <h1>Clusters</h1>
 <form method="get" action="/clusters">
-  <input type="hidden" name="view" value="{{ view }}">
   <label>Site <select name="site"><option value="">any</option>
     {% for s in options.sites %}<option {% if f.site == s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></label>
   <label>Class <select name="cls"><option value="">any</option>
@@ -31,5 +30,5 @@
 {% for n in notices %}<p class="warn">{{ n }}</p>{% endfor %}
 <p>{{ csv_link("clusters") }}</p>
 {{ site_refresh(site_names) }}
-{{ cluster_list(rows, view) }}
+{{ cluster_list(rows) }}
 {% endblock %}

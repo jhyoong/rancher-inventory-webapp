@@ -322,12 +322,6 @@ def test_text_value_sorts_by_its_text(admin_client, web_settings):
     assert 'data-sort="Team A&amp;B"><a href="/clusters?cf%d=Team%%20A%%26B">Team A&amp;B</a>' % owner in admin_client.get("/").text
 
 
-def test_cards_show_custom(admin_client, web_settings):
-    _seed_tier(web_settings)
-    body = admin_client.get("/clusters?view=cards").text
-    assert "<dt>Tier</dt><dd>dev</dd>" in body and "<dt>Tier</dt><dd>none</dd>" in body
-
-
 def test_csv_has_custom_columns(admin_client, web_settings):
     import csv
     import io
