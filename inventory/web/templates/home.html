@@ -5,7 +5,6 @@
 <h1>Overview</h1>
 {{ site_refresh(site_names) }}
 <form method="get" action="/">
-  <input type="hidden" name="view" value="{{ view }}">
   {% if scope == "all" %}<input type="hidden" name="scope" value="all">{% endif %}
   <label>Site <select name="site" onchange="this.form.submit()"><option value="">all sites</option>
     {% for s in site_names %}<option {% if site == s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></label>
@@ -53,7 +52,7 @@
 <script src="/static/chart.umd.min.js"></script>
 <script src="/static/overview.js"></script>
 <h2>Clusters</h2>
-{{ cluster_list(data.clusters, view) }}
+{{ cluster_list(data.clusters) }}
 <h2 id="removed">Removed from Rancher</h2>
 {% if removed %}
 <form method="post" action="/migration/bulk" class="bulk-edit">

@@ -9,14 +9,10 @@ from inventory.web.deps import csv_download, current_user, get_settings, read_db
 
 router = APIRouter()
 
-VIEWS = ("table", "cards")
-
-
 @router.get("/clusters")
 def clusters(request: Request, conn: sqlite3.Connection = Depends(read_db), user: User = Depends(current_user)):
     q = request.query_params
     f = {k: q.get(k, "").strip() for k in ("site", "cls", "flag", "label", "status", "wave", "member")}
-    view = q.get("view") if q.get("view") in VIEWS else "table"
     rules = load_rules(get_settings(request))
     columns = custom_columns.list_columns(conn)
     custom_f, notices = custom_columns.parse_filters(columns, q)
@@ -32,7 +28,7 @@ def clusters(request: Request, conn: sqlite3.Connection = Depends(read_db), user
         return csv_download(request, user, "clusters", {"clusters": flat, "inventory": old})
     options = {**queries.inventory_filter_options(conn), "flags": list(migration.ALL_FLAGS)}
     return render(
-        request, conn, user, "clusters.html", rows=rows, f=f, view=view, options=options,
+        request, conn, user, "clusters.html", rows=rows, f=f, options=options,
         site_names=queries.site_names(conn), custom_columns=columns, custom_f=custom_f, notices=notices,
     )  # fmt: skip
 

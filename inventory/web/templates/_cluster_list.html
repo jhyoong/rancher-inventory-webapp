@@ -37,42 +37,8 @@
 </p>
 {% endmacro %}
 
-{% macro cluster_list(rows, view) %}
-<p class="view-switch">
-  <a href="{{ request.url.include_query_params(view='table') }}"{% if view == "table" %} aria-current="page"{% endif %}>Table</a> |
-  <a href="{{ request.url.include_query_params(view='cards') }}"{% if view == "cards" %} aria-current="page"{% endif %}>Cards</a>
-</p>
+{% macro cluster_list(rows) %}
 {% set matched = rows and rows[0].label_hits %}
-{% if view == "cards" %}
-<div class="cluster-cards">
-  {% for r in rows %}
-  <div class="card cluster">
-    <h3>{{ _cluster(r) }}</h3>
-    <dl>
-      <dt>Site</dt><dd>{{ r.site }}</dd>
-      <dt>Status</dt><dd>{{ r.status }}</dd>
-      <dt>Wave</dt><dd>{{ r.wave or "none" }}</dd>
-      {% for c in custom_columns or [] %}<dt>{{ c.name }}</dt><dd>{{ r.custom.get(c.id) or "none" }}</dd>
-      {% endfor %}
-      <dt>Members</dt><dd>{{ _members(r) }}</dd>
-      <dt>Kubernetes</dt><dd>{{ r.k8s_version or "not available" }}</dd>
-      <dt>Nodes</dt><dd>{{ _nodes(r) }}</dd>
-      <dt>Pools</dt><dd>{{ _pools(r) }}</dd>
-      <dt>OS</dt><dd>{{ r.os_images | join(", ") }}</dd>
-      <dt>vCPU alloc / req / used</dt><dd>{{ _cpu(r) }}</dd>
-      <dt>Memory GiB alloc / req / used</dt><dd>{{ _mem(r) }}</dd>
-      <dt>PVs</dt><dd>{{ _pvs(r) }}</dd>
-      <dt>Floating IPs</dt><dd>{{ _floating(r) }}</dd>
-      <dt>LB</dt><dd>{{ _lb(r) }}</dd>
-      <dt>Watch out</dt><dd>{{ _watch_out(r) }}</dd>
-      {% if matched %}<dt>Matched</dt><dd>{{ r.label_hits | join(", ") }}</dd>{% endif %}
-    </dl>
-  </div>
-  {% else %}
-  <p>No clusters match.</p>
-  {% endfor %}
-</div>
-{% else %}
 <form method="post" action="/migration/bulk" class="bulk-edit">
 {{ bulk_bar(request.url.path ~ ("?" ~ request.url.query if request.url.query else "")) }}
 <table>
@@ -106,5 +72,4 @@
   {% endfor %}
 </table>
 </form>
-{% endif %}
 {% endmacro %}

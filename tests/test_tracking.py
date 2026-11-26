@@ -209,9 +209,7 @@ def test_clusters_status_filter(tracked_client):
     html = tracked_client.get("/clusters").text
     assert 'action="/migration/bulk"' in html and "data-select-all" in html and 'name="wave"' in html
     assert 'value="dev/local"' in html
-    assert 'name="next" value="/clusters?site=dev&amp;view=table"' in tracked_client.get("/clusters?site=dev&view=table").text
-    cards = tracked_client.get("/clusters?view=cards").text
-    assert "<dt>Status</dt><dd>not started</dd>" in cards and 'name="cluster"' not in cards
+    assert 'name="next" value="/clusters?site=dev"' in tracked_client.get("/clusters?site=dev").text
     assert 'name="cluster"' in tracked_client.get("/").text
 
 

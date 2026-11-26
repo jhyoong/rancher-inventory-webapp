@@ -35,8 +35,6 @@ def test_members_column_and_sort_text(admin_client, web_settings):
     assert "1 user, 1 group" in body  # disabled Bob not counted
     assert "0 users, 0 groups" in body  # c5 ok but empty
     assert "not collected" in body
-    cards = admin_client.get("/clusters?view=cards").text
-    assert "<dt>Members</dt><dd>1 user, 1 group</dd>" in cards
 
 
 def test_stale_cell(admin_client, web_settings):
