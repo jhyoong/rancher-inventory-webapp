@@ -41,7 +41,7 @@
 {% set matched = rows and rows[0].label_hits %}
 <form method="post" action="/migration/bulk" class="bulk-edit">
 {{ bulk_bar(request.url.path ~ ("?" ~ request.url.query if request.url.query else "")) }}
-<table>
+<table data-count>
   <tr><th class="nosort"><input type="checkbox" data-select-all aria-label="Select all shown"></th>
       <th>Site</th><th>Cluster</th><th>Status</th><th>Wave</th>{% for c in custom_columns or [] %}<th>{{ c.name }}</th>{% endfor %}<th>Members</th><th>Kubernetes</th><th>Nodes</th><th>Pools</th><th>OS</th>
       <th>vCPU alloc / req / used</th><th>Memory GiB alloc / req / used</th><th>PVs</th><th>Floating IPs</th>

@@ -11,3 +11,8 @@ def test_cards_view_removed(admin_client):
 def test_special_network_tile_links_to_clusters(admin_client):
     assert 'href="/clusters?flag=special-network-config"' in admin_client.get("/").text
     assert 'href="/clusters?flag=special-network-config&amp;site=dev"' in admin_client.get("/?site=dev").text
+
+
+def test_cluster_table_opts_into_count(admin_client):
+    for path in ("/", "/clusters"):
+        assert "<table data-count>" in admin_client.get(path).text, path
