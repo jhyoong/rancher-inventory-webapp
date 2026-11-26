@@ -33,6 +33,7 @@ from inventory.web.routes import (
     platform,
     presets,
     query,
+    rancher_users,
     runs,
     storage,
     tracking,
@@ -117,6 +118,7 @@ def create_app(settings: Settings, collector: CollectorThread | None) -> FastAPI
     for module in (
         auth, home, clusters, inventory, network, helm, crds, annotations, workloads, storage, namespaces, platform,
         runs, query, presets, check, admin, columns, health, export, api, tracking,
+        rancher_users,
     ):
         app.include_router(module.router)
     return app

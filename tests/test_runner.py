@@ -492,7 +492,7 @@ def test_member_read_exception_does_not_affect_run(settings, db, db_path, monkey
     for cid in ("a", "b"):
         db.execute("INSERT INTO clusters (site, cluster_id, name) VALUES ('dev', ?, ?)", [cid, cid])
     db.execute(
-        "INSERT INTO cluster_members VALUES ('dev', 'a', 'user', 'u-1', 'ann', 'ann', 0, '[]', 0)"
+        "INSERT INTO cluster_members VALUES ('dev', 'a', 'user', 'u-1', 'ann', 'ann', 0, '[]', 0, NULL)"
     )
     rid = create_run(db, "manual", "t", Scope())
     assert asyncio.run(execute_run(settings, rid)) == "ok"
@@ -533,7 +533,7 @@ def test_scoped_run_only_changes_scoped_cluster_members(settings, db, db_path, m
     for cid in ("a", "b"):
         db.execute("INSERT INTO clusters (site, cluster_id, name) VALUES ('dev', ?, ?)", [cid, cid])
         db.execute(
-            "INSERT INTO cluster_members VALUES ('dev', ?, 'user', 'u-old', 'old', 'old', 0, '[]', 0)", [cid]
+            "INSERT INTO cluster_members VALUES ('dev', ?, 'user', 'u-old', 'old', 'old', 0, '[]', 0, NULL)", [cid]
         )
     rid = create_run(db, "manual", "t", Scope(site="dev", cluster_id="a"))
     assert asyncio.run(execute_run(settings, rid)) == "ok"

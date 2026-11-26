@@ -27,6 +27,7 @@ class Member:
     username: str | None
     disabled: bool
     grants: list[dict]  # {"role", "template", "scope"}
+    principal: str | None = None  # AD (non-local) principal of a user; matches one person across sites
 
 
 @dataclass
@@ -72,6 +73,18 @@ def _subject(binding: dict, users_by_id: dict, users_by_principal: dict):
     if group:
         return "group", group, None, group
     raise ValueError("binding has no subject")
+
+
+def _is_external(principal) -> bool:
+    return isinstance(principal, str) and "://" in principal and not principal.startswith(("local://", "system://"))
+
+
+def user_principal(user: dict | None, principal: str | None) -> str | None:
+    """The user's external (AD) principal: the binding's, else the first in sorted order from the user record."""
+    if _is_external(principal):
+        return principal
+    found = sorted(p for p in (user or {}).get("principalIds") or [] if _is_external(p))
+    return found[0] if found else None
 
 
 def _user_display(user: dict | None, principal: str | None, subject: str) -> str:
@@ -150,7 +163,8 @@ def build_members(
         if member is None:
             if kind == "user":
                 member = Member("user", subject, _user_display(user, principal, subject),
-                                (user or {}).get("username"), (user or {}).get("enabled") is False, [])
+                                (user or {}).get("username"), (user or {}).get("enabled") is False, [],
+                                user_principal(user, principal))
             else:
                 member = Member("group", subject, principal_cn(subject) or _after_scheme(subject), None, False, [])
             found[cluster][(kind, subject)] = member

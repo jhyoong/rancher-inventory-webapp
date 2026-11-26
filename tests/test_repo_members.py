@@ -73,3 +73,11 @@ def test_ok_forbidden_failed_leaves_no_date_and_no_rows(db):
     write_members(db, "dev", "c1", MembersResult("failed", {}, "boom"), "t3")
     assert _rows(db) == []
     assert _state(db) == ("failed", None)
+
+
+def test_principal_stored(db):
+    _seed(db)
+    m = _m("user", "u-1", "ann")
+    m.principal = "activedirectory_user://CN=Ann,DC=x"
+    write_members(db, "dev", "c1", MembersResult("ok", {"c1": [m, _m("user", "u-2", "bob")]}), "t1")
+    assert [r["principal"] for r in _rows(db)] == ["activedirectory_user://CN=Ann,DC=x", None]

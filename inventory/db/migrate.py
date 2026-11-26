@@ -5,7 +5,7 @@ from pathlib import Path
 from inventory.settings import ConfigError
 
 MIGRATIONS_DIR = Path(__file__).parent / "migrations"
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 
 def _migration_files() -> list[tuple[int, Path]]:

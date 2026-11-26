@@ -16,7 +16,7 @@
   <nav>
     <strong class="brand">Rancher inventory</strong>
     <a href="/"{% if path == "/" %} aria-current="page"{% endif %}>Overview</a>
-    {% for href, label in [("/clusters", "Clusters"), ("/network", "Network"), ("/storage", "Storage"), ("/workloads", "Workloads"), ("/platform", "Platform")] %}
+    {% for href, label in [("/clusters", "Clusters"), ("/network", "Network"), ("/storage", "Storage"), ("/workloads", "Workloads"), ("/platform", "Platform"), ("/rancher-users", "Rancher users")] %}
     <a href="{{ href }}"{% if path.startswith(href) %} aria-current="page"{% endif %}>{{ label }}</a>
     {% endfor %}
     <details class="tools">
